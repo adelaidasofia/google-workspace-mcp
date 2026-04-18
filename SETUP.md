@@ -86,14 +86,13 @@ Call gws_account_add again
 
 Sign in with the next account.
 
-**Which accounts to OAuth**: only the mailboxes where mail actually lands. Aliases do not need their own OAuth. For your setup:
+**Which accounts to OAuth**: only the mailboxes where mail actually lands. Aliases do not need their own OAuth.
 
-| Address | Type | OAuth it? |
-|---|---|---|
-| adelaida@planwithonde.com | Real Workspace mailbox | Yes |
-| adelaida@diazroa.com | Real personal mailbox | Yes |
-| tech@onde-event.com | Alias / routing rule | **No** — it routes to a real mailbox; OAuth that real one instead. Use it as a Send-As identity. |
-| sergio@planwithonde.com | Alias to Sergio's account | **No** — only OAuth if you have full access to Sergio's real mailbox. |
+| Address type | OAuth it? |
+|---|---|
+| Real mailbox (Workspace or Gmail) | Yes |
+| Alias / routing address that forwards to a real mailbox | **No** — OAuth the real mailbox instead. Use the alias as a Send-As identity in Gmail settings. |
+| Shared mailbox you don't own / control | **No** — only OAuth if you have explicit full access. |
 
 ## 6b. Upgrading from v1 → v2 (re-OAuth required)
 
@@ -150,6 +149,6 @@ Should return up to 5 compact message summaries.
 
 **"Invalid scope" on OAuth** — the scopes listed in step 3.3 don't match what `accounts.py` requests. Re-check the consent screen scopes.
 
-**Keychain password prompts every tool call** — macOS is treating the stored secret as "read-only to the calling app." Open Keychain Access, search for `onde-google-workspace-mcp`, right-click the entry, **Access Control**, allow `python3` / `fastmcp`. Or allow "all applications" (less strict).
+**Keychain password prompts every tool call** — macOS is treating the stored secret as "read-only to the calling app." Open Keychain Access, search for `google-workspace-mcp`, right-click the entry, **Access Control**, allow `python3` / `fastmcp`. Or allow "all applications" (less strict).
 
 **Sending from an alias fails with 400** — the alias isn't configured in Gmail's "Send mail as" settings for the authenticated mailbox. Open https://mail.google.com/mail/u/0/#settings/accounts and add it, or use `gmail_sendas_list` to see what's currently allowed.
