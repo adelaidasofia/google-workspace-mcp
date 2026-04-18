@@ -7,9 +7,19 @@ reads are opt-in via structured=True.
 
 from __future__ import annotations
 
+import datetime
+import pathlib
 from typing import Any
 
 from accounts import service
+
+_AUDIT_LOG = pathlib.Path.home() / ".claude" / "google-workspace-mcp" / "audit.log"
+
+
+def _audit(action: str, detail: str) -> None:
+    ts = datetime.datetime.utcnow().isoformat() + "Z"
+    with open(_AUDIT_LOG, "a") as f:
+        f.write(f"{ts}\t{action}\t{detail}\n")
 
 
 def _flatten(body: dict) -> str:
@@ -133,7 +143,7 @@ def replace_text(
     match_case: bool = True,
     account: str | None = None,
 ) -> dict:
-    """Find-and-replace text across the entire Doc."""
+    """Find-and-replace text across the entire Doc. DESTRUCTIVE — cannot be undone via API."""
     svc = service("docs", "v1", account=account)
     resp = svc.documents().batchUpdate(
         documentId=document_id,
@@ -151,6 +161,7 @@ def replace_text(
     occurrences = 0
     for r in resp.get("replies", []):
         occurrences += r.get("replaceAllText", {}).get("occurrencesChanged", 0)
+    _audit("docs_replace_text", f"account={account or 'default'} doc={document_id} find={find!r} replace={replace!r} occurrences={occurrences}")
     return {"id": document_id, "occurrences_replaced": occurrences}
 
 
@@ -219,8 +230,9 @@ def accept_all_suggestions(
     document_id: str,
     account: str | None = None,
 ) -> dict:
-    """Accept ALL pending suggestions by reading the accepted preview and
-    rewriting the Doc. Destructive — there's no per-suggestion API path.
+    """Accept ALL pending suggestions by rewriting the Doc. DESTRUCTIVE — rewrites the entire
+    document body; formatting metadata is lost. No per-suggestion accept via API.
+    Call docs_suggestions_list first to review what will be accepted.
     """
     svc = service("docs", "v1", account=account)
     doc = svc.documents().get(
@@ -251,6 +263,7 @@ def accept_all_suggestions(
             documentId=document_id, body={"requests": requests}
         ).execute()
 
+    _audit("docs_suggestions_accept_all", f"account={account or 'default'} doc={document_id}")
     return {"id": document_id, "status": "all suggestions accepted", "char_count": len(accepted_text)}
 
 
@@ -258,8 +271,9 @@ def reject_all_suggestions(
     document_id: str,
     account: str | None = None,
 ) -> dict:
-    """Reject ALL pending suggestions by reading the rejected preview and
-    rewriting the Doc. Destructive — there's no per-suggestion API path.
+    """Reject ALL pending suggestions by rewriting the Doc. DESTRUCTIVE — rewrites the entire
+    document body; suggestions are permanently discarded.
+    Call docs_suggestions_list first to review what will be discarded.
     """
     svc = service("docs", "v1", account=account)
     doc = svc.documents().get(
@@ -290,6 +304,7 @@ def reject_all_suggestions(
             documentId=document_id, body={"requests": requests}
         ).execute()
 
+    _audit("docs_suggestions_reject_all", f"account={account or 'default'} doc={document_id}")
     return {"id": document_id, "status": "all suggestions rejected", "char_count": len(rejected_text)}
 
 

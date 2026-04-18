@@ -13,12 +13,22 @@ Design rules:
 from __future__ import annotations
 
 import base64
+import datetime
+import pathlib
 import re
 from email.message import EmailMessage
 from email.utils import parseaddr
 from typing import Any
 
 from accounts import service
+
+_AUDIT_LOG = pathlib.Path.home() / ".claude" / "google-workspace-mcp" / "audit.log"
+
+
+def _audit(action: str, detail: str) -> None:
+    ts = datetime.datetime.utcnow().isoformat() + "Z"
+    with open(_AUDIT_LOG, "a") as f:
+        f.write(f"{ts}\t{action}\t{detail}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -264,12 +274,27 @@ def send(
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
     reply_to: str | None = None,
+    dry_run: bool = False,
 ) -> dict:
-    """Send mail. `from_alias` lets you send as a configured Send-As identity
-    (e.g. adelaida@ authenticated mailbox sending as tech@onde-event.com)."""
-    svc = service("gmail", "v1", account=account)
+    """Send mail. DESTRUCTIVE — irreversible once sent.
+
+    `from_alias` lets you send as a configured Send-As identity.
+    If dry_run=True, returns what WOULD be sent without calling the API.
+    """
     raw, _ = _build_raw(to, subject, body, from_alias=from_alias, cc=cc, bcc=bcc, reply_to=reply_to)
+    if dry_run:
+        return {
+            "dry_run": True,
+            "to": to,
+            "subject": subject,
+            "from_alias": from_alias,
+            "cc": cc,
+            "body_preview": body[:500],
+            "status": "NOT SENT — dry_run=True",
+        }
+    svc = service("gmail", "v1", account=account)
     sent = svc.users().messages().send(userId="me", body={"raw": raw}).execute()
+    _audit("gmail_send", f"account={account or 'default'} to={to} subject={subject!r}")
     return {"id": sent["id"], "thread_id": sent.get("threadId"), "status": "sent"}
 
 
@@ -295,8 +320,12 @@ def reply(
     body: str,
     account: str | None = None,
     reply_all: bool = False,
+    dry_run: bool = False,
 ) -> dict:
-    """Reply to a message, preserving thread and headers."""
+    """Reply to a message. DESTRUCTIVE — sends immediately, same blast radius as gmail_send.
+
+    If dry_run=True, shows what WOULD be sent without sending.
+    """
     svc = service("gmail", "v1", account=account)
     original = svc.users().messages().get(userId="me", id=message_id, format="metadata").execute()
     h = _headers_dict(original)
@@ -315,6 +344,16 @@ def reply(
         to_list += [t.strip() for t in to_hdr.split(",") if t.strip()]
     cc_list = [c.strip() for c in cc_hdr.split(",") if c.strip()] if cc_hdr else None
 
+    if dry_run:
+        return {
+            "dry_run": True,
+            "to": to_list,
+            "subject": subject,
+            "body_preview": body[:500],
+            "in_reply_to_thread": original["threadId"],
+            "status": "NOT SENT — dry_run=True",
+        }
+
     raw, _ = _build_raw(
         to=to_list,
         subject=subject,
@@ -329,6 +368,7 @@ def reply(
         .send(userId="me", body={"raw": raw, "threadId": original["threadId"]})
         .execute()
     )
+    _audit("gmail_reply", f"account={account or 'default'} reply_to={message_id}")
     return {"id": sent["id"], "thread_id": sent["threadId"], "status": "sent"}
 
 

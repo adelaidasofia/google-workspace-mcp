@@ -1,6 +1,6 @@
 """OAuth + multi-account token management for google-workspace-mcp.
 
-Refresh tokens live in the macOS Keychain under service name KEYRING_SERVICE,
+Refresh tokens live in the macOS Keychain under service name "google-workspace-mcp" (KEYRING_SERVICE),
 keyed by the account email. client_secret.json (the OAuth app identifier, not
 a user secret) sits on disk at CLIENT_SECRET_PATH and is gitignored.
 

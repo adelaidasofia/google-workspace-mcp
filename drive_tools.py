@@ -10,12 +10,22 @@ Design rules:
 
 from __future__ import annotations
 
+import datetime
 import io
+import pathlib
 from typing import Any
 
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 
 from accounts import service
+
+_AUDIT_LOG = pathlib.Path.home() / ".claude" / "google-workspace-mcp" / "audit.log"
+
+
+def _audit(action: str, detail: str) -> None:
+    ts = datetime.datetime.utcnow().isoformat() + "Z"
+    with open(_AUDIT_LOG, "a") as f:
+        f.write(f"{ts}\t{action}\t{detail}\n")
 
 # Map Google-native mime types to sensible export formats
 GOOGLE_NATIVE_EXPORT = {
@@ -291,8 +301,16 @@ def share(
     return {"file_id": file_id, **created}
 
 
-def trash(file_id: str, account: str | None = None) -> dict:
+def trash(file_id: str, account: str | None = None, dry_run: bool = False) -> dict:
+    """Move to Trash. If dry_run=True, returns what would be trashed without doing it."""
     svc = service("drive", "v3", account=account)
+    meta = (
+        svc.files()
+        .get(fileId=file_id, fields=_BASE_FIELDS, supportsAllDrives=True)
+        .execute()
+    )
+    if dry_run:
+        return {**_summary(meta), "dry_run": True, "status": "NOT TRASHED — dry_run=True"}
     updated = (
         svc.files()
         .update(
@@ -303,6 +321,7 @@ def trash(file_id: str, account: str | None = None) -> dict:
         )
         .execute()
     )
+    _audit("drive_trash", f"account={account or 'default'} file_id={file_id} name={meta.get('name')!r}")
     return _summary(updated)
 
 
@@ -367,13 +386,14 @@ def permission_delete(
     permission_id: str,
     account: str | None = None,
 ) -> dict:
-    """Revoke a permission on a file."""
+    """Revoke a permission on a file. DESTRUCTIVE — removes access immediately."""
     svc = service("drive", "v3", account=account)
     svc.permissions().delete(
         fileId=file_id,
         permissionId=permission_id,
         supportsAllDrives=True,
     ).execute()
+    _audit("drive_permission_delete", f"account={account or 'default'} file_id={file_id} perm={permission_id}")
     return {"file_id": file_id, "permission_id": permission_id, "status": "deleted"}
 
 

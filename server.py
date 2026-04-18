@@ -9,6 +9,7 @@ Two design goals:
 2. Token-efficient. Search/list tools return compact shapes. Bodies and file
    content are opt-in via include_content / format params.
 
+Keychain service name: `google-workspace-mcp` (see accounts.py KEYRING_SERVICE).
 See SETUP.md for GCP OAuth setup; see README.md for day-to-day usage.
 """
 
@@ -125,17 +126,21 @@ def gmail_send(
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
     reply_to: str | None = None,
+    dry_run: bool = False,
 ) -> dict:
-    """Send an email.
+    """Send an email. DESTRUCTIVE — irreversible once sent.
 
     Args:
         from_alias: Send-as identity (e.g. 'tech@onde-event.com'). The
             authenticated `account` must have this alias configured in Gmail.
             Use gmail_sendas_list to see available aliases.
+        dry_run: If True, return what WOULD be sent without calling the API.
+            Use this to verify recipient, subject, and body before committing.
     """
     return gmail_tools.send(
         to=to, subject=subject, body=body, account=account,
         from_alias=from_alias, cc=cc, bcc=bcc, reply_to=reply_to,
+        dry_run=dry_run,
     )
 
 
@@ -162,10 +167,17 @@ def gmail_reply(
     body: str,
     account: str | None = None,
     reply_all: bool = False,
+    dry_run: bool = False,
 ) -> dict:
-    """Reply to a message. Preserves thread + headers."""
+    """Reply to a message. DESTRUCTIVE — sends immediately, same blast radius as gmail_send.
+    Preserves thread + headers.
+
+    Args:
+        dry_run: If True, show what WOULD be sent without sending.
+    """
     return gmail_tools.reply(
         message_id=message_id, body=body, account=account, reply_all=reply_all,
+        dry_run=dry_run,
     )
 
 
@@ -190,13 +202,16 @@ def gmail_label_apply(
 
 @mcp.tool()
 def gmail_archive(message_ids: list[str], account: str | None = None) -> dict:
-    """Archive messages (remove INBOX label)."""
+    """Archive messages: removes INBOX label but keeps them in All Mail, permanently searchable.
+    No deletion. Use this to declutter without destroying.
+    Use gmail_trash for soft-delete (messages auto-purged after 30 days)."""
     return gmail_tools.archive(message_ids=message_ids, account=account)
 
 
 @mcp.tool()
 def gmail_trash(message_ids: list[str], account: str | None = None) -> dict:
-    """Move messages to Trash."""
+    """Move messages to Trash. Soft delete: auto-purged after 30 days, not easily searchable.
+    Use gmail_archive to remove from inbox without any deletion risk."""
     return gmail_tools.trash(message_ids=message_ids, account=account)
 
 
@@ -388,6 +403,7 @@ def drive_read_file(
     Args:
         include_content: If True, fetch content. Google-native files export to
             text/csv/plain by default; override with export_mime.
+            For Google Docs where you want markdown or docx output, use docs_export instead.
         export_mime: e.g. 'text/markdown' (Docs), 'application/pdf', or
             'text/csv' (Sheets). Ignored for non-Google files.
         max_chars: Cap on returned content. Default 50k.
@@ -473,7 +489,9 @@ def drive_share(
     message: str | None = None,
     account: str | None = None,
 ) -> dict:
-    """Share a file with someone by email.
+    """Grant access to a file for someone who does not yet have a permission entry.
+    Creates a new permission. Requires their email address.
+    To change the role of someone who already has access, use drive_permission_update instead.
 
     Args:
         role: 'reader' | 'commenter' | 'writer' | 'fileOrganizer' |
@@ -487,9 +505,13 @@ def drive_share(
 
 
 @mcp.tool()
-def drive_trash(file_id: str, account: str | None = None) -> dict:
-    """Move a file to Trash (soft delete, recoverable)."""
-    return drive_tools.trash(file_id=file_id, account=account)
+def drive_trash(file_id: str, account: str | None = None, dry_run: bool = False) -> dict:
+    """Move a file to Trash (soft delete, recoverable for 30 days). DESTRUCTIVE.
+
+    Args:
+        dry_run: If True, show what would be trashed without actually trashing it.
+    """
+    return drive_tools.trash(file_id=file_id, account=account, dry_run=dry_run)
 
 
 @mcp.tool()
@@ -511,7 +533,9 @@ def drive_permission_update(
     role: str,
     account: str | None = None,
 ) -> dict:
-    """Change a grantee's role on a file.
+    """Change the access role of someone who already has a permission on this file.
+    Requires a permission_id — get it first from drive_permission_list.
+    To grant access to someone new, use drive_share instead.
 
     Args:
         role: 'reader' | 'commenter' | 'writer' | 'fileOrganizer' |
@@ -528,7 +552,8 @@ def drive_permission_delete(
     permission_id: str,
     account: str | None = None,
 ) -> dict:
-    """Revoke a permission on a file."""
+    """Revoke a permission on a file. DESTRUCTIVE — removes someone's access immediately.
+    Get permission_id from drive_permission_list first."""
     return drive_tools.permission_delete(
         file_id=file_id, permission_id=permission_id, account=account,
     )
@@ -564,7 +589,9 @@ def drive_comment_add(
     account: str | None = None,
     anchor: str | None = None,
 ) -> dict:
-    """Add a comment to a Drive file. Works on Docs, Sheets, Slides, PDFs, etc."""
+    """Add a sidebar comment (annotation) to a Drive file — not text to the document body.
+    Works on Docs, Sheets, Slides, PDFs, etc.
+    To add text to a Doc's body, use docs_append or docs_insert_at."""
     return drive_tools.comment_add(
         file_id=file_id, content=content, account=account, anchor=anchor,
     )
@@ -620,8 +647,10 @@ def docs_read(
     structured: bool = False,
     max_chars: int = 50_000,
 ) -> dict:
-    """Read a Google Doc. Flat text by default; pass structured=True for the
-    full Docs API tree (paragraphs, tables, text runs).
+    """Read a Google Doc as flat plain text (formatting stripped) or as the full
+    Docs API structural tree (paragraphs, text runs, tables) with structured=True.
+    For formatted output (markdown, PDF, docx), use docs_export instead.
+    Use structured=True for programmatic access to document structure.
     """
     return docs_tools.read(
         document_id=document_id, account=account,
@@ -646,7 +675,8 @@ def docs_insert_at(
     index: int,
     account: str | None = None,
 ) -> dict:
-    """Insert text at a specific index. Index 1 = start of body."""
+    """Insert text at a specific character index within the Doc body. Index 1 = start of body.
+    Use docs_append instead when adding to the end — it calculates the index automatically."""
     return docs_tools.insert_at(
         document_id=document_id, text=text, index=index, account=account,
     )
@@ -674,7 +704,9 @@ def docs_export(
     account: str | None = None,
     max_chars: int = 100_000,
 ) -> dict:
-    """Export a Doc to markdown / pdf / docx / rtf / plain text.
+    """Export a Doc to a formatted output file. Default is markdown (headers, bold, lists preserved).
+    Preferred over docs_read when you need formatted content rather than stripped plain text.
+    For programmatic access to document structure (paragraphs, runs), use docs_read with structured=True.
 
     Args:
         mime: 'text/markdown' (default) | 'text/plain' | 'application/pdf' |
@@ -702,8 +734,9 @@ def docs_suggestions_accept_all(
     document_id: str,
     account: str | None = None,
 ) -> dict:
-    """Accept ALL pending suggestions by rewriting the Doc with the accepted
-    preview. Destructive — there's no per-suggestion accept via API."""
+    """Accept ALL pending suggestions by rewriting the Doc. DESTRUCTIVE — rewrites the entire
+    document body; formatting metadata is lost. No per-suggestion accept via API.
+    Call docs_suggestions_list first to review what will be accepted."""
     return docs_tools.accept_all_suggestions(document_id=document_id, account=account)
 
 
@@ -712,8 +745,9 @@ def docs_suggestions_reject_all(
     document_id: str,
     account: str | None = None,
 ) -> dict:
-    """Reject ALL pending suggestions by rewriting the Doc without them.
-    Destructive — there's no per-suggestion reject via API."""
+    """Reject ALL pending suggestions by rewriting the Doc. DESTRUCTIVE — rewrites the entire
+    document body; suggestions are permanently discarded. No per-suggestion reject via API.
+    Call docs_suggestions_list first to review what will be discarded."""
     return docs_tools.reject_all_suggestions(document_id=document_id, account=account)
 
 
