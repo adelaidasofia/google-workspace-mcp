@@ -1,0 +1,6 @@
+client_secret.json
+accounts_index.json
+__pycache__/
+*.pyc
+.env
+*.log

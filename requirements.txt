@@ -1,0 +1,5 @@
+fastmcp>=3.2.3
+google-auth>=2.29.0
+google-auth-oauthlib>=1.2.0
+google-api-python-client>=2.130.0
+keyring>=24.0.0

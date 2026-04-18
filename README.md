@@ -1,0 +1,126 @@
+# google-workspace-mcp
+
+Multi-account, token-efficient MCP for **Gmail + Calendar + Drive + Docs + Sheets**.
+Built because the official Claude connector supports one account and returns full
+message/file bodies by default.
+
+## Why this exists
+
+- **Multi-account**: OAuth multiple mailboxes (work + personal + co-founder). Every
+  tool takes an `account` email; aliases are handled via Send-As identities.
+- **Token-efficient**: Search/list returns compact shapes (`{id, from, subject,
+  snippet, ...}` for mail, `{id, name, mime, modified, size, ...}` for Drive).
+  Bodies and file content are opt-in.
+- **Keychain-backed**: Refresh tokens live in the macOS Keychain, not plaintext
+  files. No tokens in the vault, no tokens in any repo.
+
+## Tools (v2, 61 tools)
+
+### Account management (3)
+- `gws_account_add` — browser OAuth flow, adds a new authorized mailbox
+- `gws_account_list` — list authorized accounts + default
+- `gws_account_remove` — remove local credential (doesn't revoke Google-side)
+
+### Gmail (10)
+- `gmail_search` — search with Gmail operators. Compact response.
+- `gmail_read` — read one message or full thread. Bodies opt-in.
+- `gmail_send` — send mail, optional `from_alias` for Send-As identities
+- `gmail_draft` — create a draft
+- `gmail_reply` — reply (preserves thread + headers), optional reply_all
+- `gmail_labels_list` — list all labels
+- `gmail_label_apply` — batch add/remove labels
+- `gmail_archive` — batch archive (remove INBOX)
+- `gmail_trash` — batch move to trash
+- `gmail_sendas_list` — list Send-As identities on this mailbox
+
+### Calendar (7)
+- `cal_list_calendars` — list all calendars
+- `cal_list_events` — list upcoming events (compact by default, `verbose=True` for full)
+- `cal_create_event` — create event, optional Google Meet link
+- `cal_update_event` — partial-update fields
+- `cal_delete_event` — delete
+- `cal_freebusy` — check busy windows for scheduling
+- `cal_respond` — accept/decline/tentative
+
+### Drive (18)
+- `drive_search` — free-text or raw Drive q-syntax. Metadata-only response.
+- `drive_read_file` — metadata by default; `include_content=True` for body
+- `drive_list_folder` — direct children of a folder (`'root'` for My Drive)
+- `drive_create_folder` — create a folder under an optional parent
+- `drive_upload` — upload a local file, optional `convert_to_google`
+- `drive_move` — change parent folder
+- `drive_rename` — rename a file or folder
+- `drive_share` — grant reader/commenter/writer/etc. access by email
+- `drive_trash` — soft delete (recoverable)
+- `drive_untrash` — restore from Trash
+- `drive_permission_list` — list everyone with access to a file
+- `drive_permission_update` — change a grantee's role
+- `drive_permission_delete` — revoke a permission
+- `drive_shared_drives_list` — list shared drives this account accesses
+- `drive_comments_list` — list comments on any Drive file (Doc/Sheet/Slide/upload)
+- `drive_comment_add` — add a comment, optional anchor
+- `drive_comment_reply` — reply to a comment
+- `drive_comment_resolve` — mark a comment resolved
+
+### Docs (9)
+- `docs_create` — new Doc, optional initial body and parent folder
+- `docs_read` — flat text by default; `structured=True` for full Docs API tree
+- `docs_append` — append text to end of body
+- `docs_insert_at` — insert text at a specific index
+- `docs_replace_text` — find-and-replace, returns count replaced
+- `docs_export` — export to markdown / pdf / docx / rtf / plain
+- `docs_suggestions_list` — list pending tracked-change suggestions
+- `docs_suggestions_accept_all` — accept all suggestions (rewrites Doc)
+- `docs_suggestions_reject_all` — reject all suggestions (rewrites Doc)
+
+### Sheets (14)
+- `sheets_create` — new workbook, optional parent folder
+- `sheets_list_sheets` — list tabs with row/col dimensions
+- `sheets_add_sheet` — add a new tab to an existing workbook
+- `sheets_read_range` — read A1 range. `FORMULA` / `UNFORMATTED_VALUE` options.
+- `sheets_write_range` — overwrite a range. `USER_ENTERED` parses formulas.
+- `sheets_append` — append rows below existing data
+- `sheets_clear_range` — clear values (formatting preserved)
+- `sheets_batch_read` — multi-range read in one API call
+- `sheets_batch_write` — multi-range write in one API call
+- `sheets_named_ranges_list` — list named ranges in a workbook
+- `sheets_named_range_add` — create a named range
+- `sheets_named_range_delete` — delete a named range
+- `sheets_conditional_format_add` — add a conditional formatting rule
+- `sheets_data_validation_add` — set dropdown / number / email / URL validation
+
+## Install
+
+See [SETUP.md](SETUP.md) for the one-time GCP setup (~45 min for v1, ~5 min
+incremental to enable Drive/Docs/Sheets for v2).
+
+After setup:
+```bash
+pip3 install --break-system-packages -r requirements.txt
+```
+
+## Register with Claude Code
+
+Add to your project's `.mcp.json` (or `~/.claude.json` for global access):
+```json
+"google-workspace": {
+  "type": "stdio",
+  "command": "python3",
+  "args": ["/path/to/google-workspace-mcp/server.py"]
+}
+```
+
+## Upgrading from v1 → v2
+
+v2 adds Drive + Docs + Sheets scopes. **Each authorized account must re-OAuth
+once** so Google grants the new scopes. See SETUP.md step 6b.
+
+## Roadmap
+
+- **v3**: Gmail filters, vacation responder, push notifications (Gmail Watch),
+  Calendar ACL/delegation, Slides, Forms, Tasks
+- **v4**: Batch requests across services, Drive revisions
+
+## License
+
+MIT
