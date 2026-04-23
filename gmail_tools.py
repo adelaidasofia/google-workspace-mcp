@@ -151,36 +151,51 @@ def search(
     svc = service("gmail", "v1", account=account)
     lbls = _label_map(svc)
 
+    page_size = min(max(limit, 1), 100)
     params: dict[str, Any] = {
         "userId": "me",
         "q": query,
-        "maxResults": min(max(limit, 1), 50),
+        "maxResults": page_size,
         "includeSpamTrash": include_spam_trash,
     }
     if label_filter:
         params["labelIds"] = _resolve_label_ids(svc, label_filter)
 
-    resp = svc.users().messages().list(**params).execute()
-    message_ids = [m["id"] for m in resp.get("messages", [])]
+    # Collect IDs, following pagination until we have enough
+    message_ids: list[str] = []
+    while len(message_ids) < limit:
+        resp = svc.users().messages().list(**params).execute()
+        page_ids = [m["id"] for m in resp.get("messages", [])]
+        message_ids.extend(page_ids)
+        if "nextPageToken" not in resp or not page_ids:
+            break
+        params["pageToken"] = resp["nextPageToken"]
+    message_ids = message_ids[:limit]
+
     if not message_ids:
         return []
 
-    # Batch fetch metadata only (no body) — this is the token savings
-    results = []
+    # Batch-fetch metadata for all IDs in a single HTTP round-trip
+    fetched: dict[str, dict] = {}
+
+    def _collect(req_id: str, response: dict | None, exception: Exception | None) -> None:
+        if exception is None and response is not None:
+            fetched[req_id] = response
+
+    batch = svc.new_batch_http_request(callback=_collect)
     for mid in message_ids:
-        msg = (
-            svc.users()
-            .messages()
-            .get(
+        batch.add(
+            svc.users().messages().get(
                 userId="me",
                 id=mid,
                 format="metadata",
                 metadataHeaders=["From", "To", "Subject", "Date"],
-            )
-            .execute()
+            ),
+            request_id=mid,
         )
-        results.append(_summary(msg, lbls))
-    return results
+    batch.execute()
+
+    return [_summary(fetched[mid], lbls) for mid in message_ids if mid in fetched]
 
 
 def read(

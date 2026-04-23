@@ -13,8 +13,19 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 from typing import Iterable
+
+_refresh_locks: dict[str, threading.Lock] = {}
+_refresh_locks_mu = threading.Lock()
+
+
+def _get_refresh_lock(email: str) -> threading.Lock:
+    with _refresh_locks_mu:
+        if email not in _refresh_locks:
+            _refresh_locks[email] = threading.Lock()
+        return _refresh_locks[email]
 
 import keyring
 from google.auth.transport.requests import Request
@@ -133,27 +144,28 @@ def remove_account(email: str) -> dict:
 
 def _credentials_for(email: str) -> Credentials:
     _check_client_secret()
-    refresh_token = keyring.get_password(KEYRING_SERVICE, email)
-    if not refresh_token:
-        raise AccountError(
-            f"No refresh token for {email}. Run gws_account_add to authorize it."
+    with _get_refresh_lock(email):
+        refresh_token = keyring.get_password(KEYRING_SERVICE, email)
+        if not refresh_token:
+            raise AccountError(
+                f"No refresh token for {email}. Run gws_account_add to authorize it."
+            )
+
+        client_cfg = json.loads(CLIENT_SECRET_PATH.read_text())
+        installed = client_cfg.get("installed") or client_cfg.get("web") or {}
+        client_id = installed.get("client_id")
+        client_secret = installed.get("client_secret")
+
+        creds = Credentials(
+            token=None,
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=client_id,
+            client_secret=client_secret,
+            scopes=SCOPES,
         )
-
-    client_cfg = json.loads(CLIENT_SECRET_PATH.read_text())
-    installed = client_cfg.get("installed") or client_cfg.get("web") or {}
-    client_id = installed.get("client_id")
-    client_secret = installed.get("client_secret")
-
-    creds = Credentials(
-        token=None,
-        refresh_token=refresh_token,
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=client_id,
-        client_secret=client_secret,
-        scopes=SCOPES,
-    )
-    creds.refresh(Request())
-    return creds
+        creds.refresh(Request())
+        return creds
 
 
 def service(api: str, version: str, account: str | None = None):
