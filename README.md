@@ -121,6 +121,27 @@ once** so Google grants the new scopes. See SETUP.md step 6b.
   Calendar ACL/delegation, Slides, Forms, Tasks
 - **v4**: Batch requests across services, Drive revisions
 
+## Related MCPs
+
+Same author, same architecture pattern (FastMCP, draft+confirm on writes where applicable, vault auto-export, MIT):
+
+- [slack-mcp](https://github.com/adelaidasofia/slack-mcp) — multi-workspace Slack
+- [imessage-mcp](https://github.com/adelaidasofia/imessage-mcp) — macOS iMessage
+- [whatsapp-mcp](https://github.com/adelaidasofia/whatsapp-mcp) — WhatsApp via whatsmeow
+- [apollo-mcp](https://github.com/adelaidasofia/apollo-mcp) — Apollo.io CRM + sequences
+- [substack-mcp](https://github.com/adelaidasofia/substack-mcp) — Substack writing + analytics
+- [luma-mcp](https://github.com/adelaidasofia/luma-mcp) — lu.ma events
+- [parse-mcp](https://github.com/adelaidasofia/parse-mcp) — markitdown / Docling / LlamaParse router
+- [rescuetime-mcp](https://github.com/adelaidasofia/rescuetime-mcp) — RescueTime productivity data
+- [graph-query-mcp](https://github.com/adelaidasofia/graph-query-mcp) — vault knowledge graph queries
+- [graph-autotagger-mcp](https://github.com/adelaidasofia/graph-autotagger-mcp) — wikilink suggestions from the graph
+- [investor-relations-mcp](https://github.com/adelaidasofia/investor-relations-mcp) — seed-raise pipeline tracker
+- [vault-sync-mcp](https://github.com/adelaidasofia/vault-sync-mcp) — bidirectional vault sync
+
 ## License
 
 MIT
+
+---
+
+Built by Adelaida Diaz-Roa. Full install or team version at [diazroa.com](https://diazroa.com).
