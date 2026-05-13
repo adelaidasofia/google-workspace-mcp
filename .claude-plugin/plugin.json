@@ -1,0 +1,9 @@
+{
+  "name": "google-workspace-mcp",
+  "description": "Multi-account, token-efficient MCP for Gmail + Calendar + Drive + Docs + Sheets. 61 tools, macOS Keychain-backed refresh tokens.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Mycelium AI",
+    "url": "https://myceliumai.co"
+  }
+}
