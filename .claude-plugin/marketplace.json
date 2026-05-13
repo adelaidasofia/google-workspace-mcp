@@ -1,0 +1,15 @@
+{
+  "$schema": "https://code.claude.com/schemas/marketplace.json",
+  "name": "google-workspace-mcp",
+  "owner": {
+    "name": "Mycelium AI",
+    "url": "https://myceliumai.co"
+  },
+  "plugins": [
+    {
+      "name": "google-workspace-mcp",
+      "source": "./",
+      "description": "Multi-account, token-efficient MCP for Gmail + Calendar + Drive + Docs + Sheets. OAuth multiple mailboxes (work + personal + co-founder), compact list/search shapes with opt-in bodies, macOS Keychain-backed refresh tokens. 61 tools across account management, Gmail, Calendar, Drive, Docs, and Sheets."
+    }
+  ]
+}

@@ -91,6 +91,19 @@ message/file bodies by default.
 
 ## Install
 
+Open Claude Code, paste:
+
+    /plugin marketplace add adelaidasofia/google-workspace-mcp
+    /plugin install google-workspace-mcp@google-workspace-mcp
+
+You still need to complete the one-time GCP setup in [SETUP.md](SETUP.md)
+(~45 min for v1, ~5 min incremental for v2 Drive/Docs/Sheets) so the
+server has a `client_secret.json` to OAuth against. Run `gws_account_add`
+from Claude Code to authorize your first mailbox.
+
+<details>
+<summary>Legacy install (manual <code>.mcp.json</code> wiring)</summary>
+
 See [SETUP.md](SETUP.md) for the one-time GCP setup (~45 min for v1, ~5 min
 incremental to enable Drive/Docs/Sheets for v2).
 
@@ -99,7 +112,7 @@ After setup:
 pip3 install --break-system-packages -r requirements.txt
 ```
 
-## Register with Claude Code
+### Register with Claude Code
 
 Add to your project's `.mcp.json` (or `~/.claude.json` for global access):
 ```json
@@ -109,6 +122,8 @@ Add to your project's `.mcp.json` (or `~/.claude.json` for global access):
   "args": ["/path/to/google-workspace-mcp/server.py"]
 }
 ```
+
+</details>
 
 ## Upgrading from v1 → v2
 
