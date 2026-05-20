@@ -16,6 +16,7 @@
       "transport": {
         "type": "stdio"
       },
+      "fileSha256": "af8202af5563d7cb6338345aca711fabb26f172d015e3c3fe88bdca2bf3929b3",
       "environmentVariables": [
         {
           "name": "GOOGLE_OAUTH_CLIENT_ID",
