@@ -1,0 +1,65 @@
+{
+  "manifest_version": "0.4",
+  "name": "google-workspace-mcp",
+  "display_name": "Multi-account MCP for Gmail, Calendar, Drive, Docs, and Sheets \u2014 61 tools, token",
+  "version": "0.1.0",
+  "description": "Multi-account MCP for Gmail, Calendar, Drive, Docs, and Sheets \u2014 61 tools, token-efficient, macOS Keychain-backed.",
+  "author": {
+    "name": "Adelaida Diaz-Roa",
+    "url": "https://github.com/adelaidasofia"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adelaidasofia/google-workspace-mcp.git"
+  },
+  "homepage": "https://github.com/adelaidasofia/google-workspace-mcp",
+  "documentation": "https://github.com/adelaidasofia/google-workspace-mcp#readme",
+  "support": "https://github.com/adelaidasofia/google-workspace-mcp/issues",
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "fastmcp",
+    "google-workspace"
+  ],
+  "server": {
+    "type": "python",
+    "entry_point": "server.py",
+    "mcp_config": {
+      "command": "python3",
+      "args": [
+        "${__dirname}/server.py"
+      ],
+      "env": {
+        "GOOGLE_OAUTH_CLIENT_ID": "${user_config.google_oauth_client_id}",
+        "GOOGLE_OAUTH_CLIENT_SECRET": "${user_config.google_oauth_client_secret}"
+      }
+    }
+  },
+  "tools_generated": true,
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ]
+  },
+  "user_config": {
+    "google_oauth_client_id": {
+      "type": "string",
+      "title": "Google OAuth client ID",
+      "description": "From console.cloud.google.com",
+      "required": true,
+      "sensitive": false
+    },
+    "google_oauth_client_secret": {
+      "type": "string",
+      "title": "Google OAuth client secret",
+      "description": "From console.cloud.google.com",
+      "required": true,
+      "sensitive": true
+    }
+  }
+}
