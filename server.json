@@ -11,12 +11,12 @@
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/adelaidasofia/google-workspace-mcp/releases/latest/download/google-workspace-mcp.mcpb",
+      "identifier": "https://github.com/adelaidasofia/google-workspace-mcp/releases/download/v0.1.0/google-workspace-mcp.mcpb",
       "version": "0.1.0",
       "transport": {
         "type": "stdio"
       },
-      "fileSha256": "af8202af5563d7cb6338345aca711fabb26f172d015e3c3fe88bdca2bf3929b3",
+      "fileSha256": "5d3906728eed93c39cd05a5f8369684047f8ccd5c3fda69be4e74b4e3c5d4f50",
       "environmentVariables": [
         {
           "name": "GOOGLE_OAUTH_CLIENT_ID",
