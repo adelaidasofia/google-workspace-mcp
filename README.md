@@ -1,5 +1,20 @@
 # google-workspace-mcp
 
+
+<!-- mycelium-badges:start -->
+
+<p>
+  <a href="https://github.com/adelaidasofia/google-workspace-mcp/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/adelaidasofia/google-workspace-mcp?color=blue"></a>
+  <a href="https://github.com/adelaidasofia/google-workspace-mcp/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/adelaidasofia/google-workspace-mcp?color=eab308"></a>
+  <a href="https://github.com/adelaidasofia/google-workspace-mcp/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/adelaidasofia/google-workspace-mcp"></a>
+  <a href="https://github.com/adelaidasofia/google-workspace-mcp/issues"><img alt="Open issues" src="https://img.shields.io/github/issues/adelaidasofia/google-workspace-mcp"></a>
+  <a href="https://pypi.org/project/adelaidasofia-google-workspace-mcp/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/adelaidasofia-google-workspace-mcp?color=blue&label=pypi"></a>
+  <a href="https://pypi.org/project/adelaidasofia-google-workspace-mcp/"><img alt="PyPI downloads" src="https://img.shields.io/pypi/dm/adelaidasofia-google-workspace-mcp?color=blue&label=downloads"></a>
+  <a href="https://myceliumai.co"><img alt="Built by Mycelium AI" src="https://img.shields.io/badge/built_by-Mycelium_AI-15B89A"></a>
+</p>
+
+<!-- mycelium-badges:end -->
+
 Multi-account, token-efficient MCP for **Gmail + Calendar + Drive + Docs + Sheets**.
 Built because the official Claude connector supports one account and returns full
 message/file bodies by default.
