@@ -175,25 +175,31 @@ def search(
     if not message_ids:
         return []
 
-    # Batch-fetch metadata for all IDs in a single HTTP round-trip
+    # Batch-fetch metadata. Gmail's batch endpoint hard-caps inner requests
+    # at 100 ("Inner request count exceeds the limit. Received: N, Limit: 100"
+    # — observed 2026-05-25 when email-triage requested PER_ACCOUNT_LIMIT=120).
+    # Chunk into pages of <=100 and concatenate the results.
     fetched: dict[str, dict] = {}
 
     def _collect(req_id: str, response: dict | None, exception: Exception | None) -> None:
         if exception is None and response is not None:
             fetched[req_id] = response
 
-    batch = svc.new_batch_http_request(callback=_collect)
-    for mid in message_ids:
-        batch.add(
-            svc.users().messages().get(
-                userId="me",
-                id=mid,
-                format="metadata",
-                metadataHeaders=["From", "To", "Subject", "Date"],
-            ),
-            request_id=mid,
-        )
-    batch.execute()
+    GMAIL_BATCH_MAX = 100
+    for i in range(0, len(message_ids), GMAIL_BATCH_MAX):
+        chunk = message_ids[i : i + GMAIL_BATCH_MAX]
+        batch = svc.new_batch_http_request(callback=_collect)
+        for mid in chunk:
+            batch.add(
+                svc.users().messages().get(
+                    userId="me",
+                    id=mid,
+                    format="metadata",
+                    metadataHeaders=["From", "To", "Subject", "Date"],
+                ),
+                request_id=mid,
+            )
+        batch.execute()
 
     return [_summary(fetched[mid], lbls) for mid in message_ids if mid in fetched]
 
