@@ -262,7 +262,7 @@ def _build_raw(
 def sendas_list(account: str | None = None) -> list[dict]:
     """List all 'Send mail as' identities configured on this mailbox.
 
-    Use this to discover which aliases (e.g. tech@onde-event.com) a given
+    Use this to discover which aliases (e.g. ops@example.com) a given
     authenticated account is allowed to send from.
     """
     svc = service("gmail", "v1", account=account)

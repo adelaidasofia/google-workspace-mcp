@@ -1,7 +1,7 @@
 """Google Workspace MCP — Gmail + Calendar + Drive + Docs + Sheets,
 multi-account, token-efficient.
 
-Registered in ~/Desktop/Adelaida Notes/.mcp.json as `google-workspace`.
+Registered in `~/.claude/.mcp.json` (or your project's `.mcp.json`) as `google-workspace`.
 
 Two design goals:
 1. Multi-account. Every tool takes `account` as an optional email; default is
@@ -131,7 +131,7 @@ def gmail_send(
     """Send an email. DESTRUCTIVE — irreversible once sent.
 
     Args:
-        from_alias: Send-as identity (e.g. 'tech@onde-event.com'). The
+        from_alias: Send-as identity (e.g. 'ops@example.com'). The
             authenticated `account` must have this alias configured in Gmail.
             Use gmail_sendas_list to see available aliases.
         dry_run: If True, return what WOULD be sent without calling the API.
