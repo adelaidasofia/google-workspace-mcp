@@ -10,7 +10,7 @@ One-time setup: ~45-60 minutes. Do it once, every account you add after takes ~9
 ## 1. Create a Google Cloud project
 
 1. Open https://console.cloud.google.com/projectcreate
-2. Project name: `onde-workspace-mcp` (or whatever). Location: No organization.
+2. Project name: `google-workspace-mcp` (or whatever). Location: No organization.
 3. Click **Create**. Wait ~30 seconds for the project to spin up.
 4. Make sure the new project is selected in the top-left dropdown.
 
@@ -52,7 +52,7 @@ https://console.cloud.google.com/apis/credentials
 
 1. Click **Create Credentials → OAuth client ID**.
 2. Application type: **Desktop app**.
-3. Name: `onde-workspace-mcp-desktop`.
+3. Name: `google-workspace-mcp-desktop`.
 4. Click **Create**. A dialog shows the client ID + secret.
 5. Click **Download JSON**. Save the file — this is what the MCP reads.
 
@@ -76,7 +76,7 @@ Confirm `google-workspace` appears. Then, in a message:
 
 > Call gws_account_add
 
-A browser window opens. Sign in with the first account (e.g. `adelaida@planwithonde.com`), grant all requested scopes, wait for the "authentication flow complete" page, come back to Claude.
+A browser window opens. Sign in with the first account (e.g. `you@yourcompany.com`), grant all requested scopes, wait for the "authentication flow complete" page, come back to Claude.
 
 Repeat for each real mailbox you want connected:
 
@@ -102,7 +102,7 @@ so Google issues a refresh token that covers the new scopes.
 
 For each already-authorized mailbox:
 
-1. Go to https://myaccount.google.com/permissions, find **Onde Workspace MCP**
+1. Go to https://myaccount.google.com/permissions, find **Google Workspace MCP**
    (or whatever you named the OAuth app), click **Remove Access**. This forces
    Google to show a fresh consent screen on next OAuth.
 2. In Claude Code, call `gws_account_add` and sign in again as that mailbox.
@@ -120,7 +120,7 @@ refresh token's scope silently.)
 The first authorized account becomes default automatically. To override, add to `~/.zshrc`:
 
 ```bash
-export GWS_DEFAULT_ACCOUNT="adelaida@planwithonde.com"
+export GWS_DEFAULT_ACCOUNT="you@yourcompany.com"
 ```
 
 Every `gmail_*` and `cal_*` tool takes an optional `account` param that overrides this.
@@ -131,7 +131,7 @@ Every `gmail_*` and `cal_*` tool takes an optional `account` param that override
 Call gws_account_list
 ```
 
-Should return `{"accounts": ["adelaida@planwithonde.com", "adelaida@diazroa.com"], "default": "adelaida@planwithonde.com", "count": 2}`.
+Should return `{"accounts": ["you@yourcompany.com", "you@gmail.com"], "default": "you@yourcompany.com", "count": 2}`.
 
 Then:
 
@@ -143,9 +143,9 @@ Should return up to 5 compact message summaries.
 
 ## Troubleshooting
 
-**"No refresh token for X"** — you authorized the account but Google didn't return a refresh token. Go to https://myaccount.google.com/permissions, revoke "Onde Workspace MCP", then re-run `gws_account_add`. The `prompt=consent` flag forces a fresh token on re-auth.
+**"No refresh token for X"** — you authorized the account but Google didn't return a refresh token. Go to https://myaccount.google.com/permissions, revoke "Google Workspace MCP", then re-run `gws_account_add`. The `prompt=consent` flag forces a fresh token on re-auth.
 
-**"Access blocked: onde-workspace-mcp has not completed verification"** — the email you're signing in with is not on the test-users list in step 3.4. Add it and retry.
+**"Access blocked: google-workspace-mcp has not completed verification"** — the email you're signing in with is not on the test-users list in step 3.4. Add it and retry.
 
 **"Invalid scope" on OAuth** — the scopes listed in step 3.3 don't match what `accounts.py` requests. Re-check the consent screen scopes.
 
