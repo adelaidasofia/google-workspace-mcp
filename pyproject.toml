@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=82.0.1", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "google-workspace-mcp"
+version = "0.1.0"
+description = "FastMCP server exposing Google Workspace (Gmail, Calendar, Drive, Docs, Sheets) tools."
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp>=3.4.2",
+    "google-auth>=2.53.0",
+    "google-auth-oauthlib>=1.4.0",
+    "google-api-python-client>=2.197.0",
+    "keyring>=25.7.0",
+]
+
+# Flat layout (modules at repo root). List them explicitly so the editable
+# build is deterministic and setuptools does not fail discovery with
+# "Multiple top-level modules discovered in a flat-layout".
+[tool.setuptools]
+py-modules = ["accounts", "calendar_tools", "docs_tools", "drive_tools", "gmail_tools", "server", "sheets_tools"]
