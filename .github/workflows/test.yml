@@ -13,8 +13,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install package + test deps
@@ -32,6 +32,7 @@ jobs:
           pytest tests/ -v
           code=$?
           set -e
-          # Exit 5 = no tests collected. Tolerate it; the install step above
-          # already validated the package imports.
+          # Exit 5 = no tests collected (tests/ holds only credential-gated
+          # integration smoke scripts with no pytest functions). Tolerate it;
+          # the install step above already validated the package imports.
           [ "$code" = "0" ] || [ "$code" = "5" ]
