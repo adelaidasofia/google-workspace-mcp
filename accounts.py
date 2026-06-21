@@ -27,6 +27,14 @@ def _get_refresh_lock(email: str) -> threading.Lock:
             _refresh_locks[email] = threading.Lock()
         return _refresh_locks[email]
 
+
+# In-process credential cache, keyed by email. Populated on first use of an
+# account in this process; later calls reuse the cached Credentials and refresh
+# in place when the access token expires. This keeps the keychain read to at
+# most once per account per process — on macOS each keychain read can pop an
+# authorization prompt, so reading per-call produced a prompt storm.
+_creds_cache: dict[str, "Credentials"] = {}
+
 import keyring
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -72,8 +80,15 @@ def _save_index(emails: Iterable[str]) -> None:
 
 
 def list_accounts() -> list[str]:
-    """Return all account emails that currently have a refresh token in the keychain."""
-    return [e for e in _load_index() if keyring.get_password(KEYRING_SERVICE, e)]
+    """Return all account emails from the on-disk index.
+
+    The index (written by add_account / removed by remove_account) is the source
+    of truth. We deliberately do NOT read each token from the keychain here:
+    doing so decrypts every secret just to enumerate, which on macOS triggers a
+    Keychain authorization prompt per item per process. Token presence is
+    verified lazily by _credentials_for(), which fails loud if a token is gone.
+    """
+    return _load_index()
 
 
 def default_account() -> str:
@@ -116,6 +131,7 @@ def add_account(port: int = 0) -> dict:
         raise AccountError("OAuth succeeded but userinfo didn't return an email.")
 
     keyring.set_password(KEYRING_SERVICE, email, creds.refresh_token or "")
+    _creds_cache.pop(email, None)  # drop any stale cached creds for a re-auth
     if not creds.refresh_token:
         raise AccountError(
             "Google didn't return a refresh_token. Revoke access at "
@@ -139,12 +155,24 @@ def remove_account(email: str) -> dict:
         pass
     index = [e for e in _load_index() if e != email]
     _save_index(index)
+    _creds_cache.pop(email, None)
     return {"email": email, "status": "removed"}
 
 
 def _credentials_for(email: str) -> Credentials:
     _check_client_secret()
     with _get_refresh_lock(email):
+        # Reuse cached credentials when possible to avoid a keychain read (and
+        # its macOS prompt) on every call. Refresh in place on expiry — the
+        # refresh uses the in-memory refresh_token, not the keychain.
+        cached = _creds_cache.get(email)
+        if cached is not None:
+            if cached.valid:
+                return cached
+            if cached.expired and cached.refresh_token:
+                cached.refresh(Request())
+                return cached
+
         refresh_token = keyring.get_password(KEYRING_SERVICE, email)
         if not refresh_token:
             raise AccountError(
@@ -165,6 +193,7 @@ def _credentials_for(email: str) -> Credentials:
             scopes=SCOPES,
         )
         creds.refresh(Request())
+        _creds_cache[email] = creds
         return creds
 
 
