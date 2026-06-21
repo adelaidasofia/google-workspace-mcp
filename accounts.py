@@ -1,12 +1,17 @@
 """OAuth + multi-account token management for google-workspace-mcp.
 
-Refresh tokens live in the macOS Keychain under service name "google-workspace-mcp" (KEYRING_SERVICE),
-keyed by the account email. client_secret.json (the OAuth app identifier, not
-a user secret) sits on disk at CLIENT_SECRET_PATH and is gitignored.
+Refresh tokens live in one of two backends (see _token_file): the OS keyring
+(default — service name "google-workspace-mcp" / KEYRING_SERVICE, encrypted at
+rest), or a chmod-600 JSON file when GWS_TOKEN_FILE is set or tokens.json
+exists next to this module. The file backend avoids the macOS Keychain's
+per-app authorization prompts, which never persist on an ad-hoc-signed
+interpreter (e.g. a uv-managed Python). Tokens are keyed by account email.
+client_secret.json (the OAuth app identifier, not a user secret) sits on disk
+at CLIENT_SECRET_PATH and is gitignored; tokens.json must be gitignored too.
 
 Design: every Gmail/Calendar call takes an `account` email. We look up that
-account's refresh token in the keychain, rebuild Credentials, auto-refresh if
-the access token expired, and hand back a googleapiclient service object.
+account's refresh token via the token store, rebuild Credentials, auto-refresh
+if the access token expired, and hand back a googleapiclient service object.
 """
 
 from __future__ import annotations
@@ -79,6 +84,74 @@ def _save_index(emails: Iterable[str]) -> None:
     ACCOUNTS_INDEX_PATH.write_text(json.dumps(sorted(set(emails)), indent=2))
 
 
+# --- Token storage backend ------------------------------------------------
+# Default: the OS keyring (cross-platform, encrypted at rest). Opt-in: a
+# chmod-600 JSON file ({email: refresh_token}). File mode skips the macOS
+# Keychain entirely, so there are no per-app ACL / partition-list prompts —
+# the failure mode when the server runs on an ad-hoc-signed interpreter whose
+# signature can't anchor a persistent "Always Allow". File mode is active when
+# GWS_TOKEN_FILE is set OR tokens.json exists next to this module. Keep the
+# file gitignored.
+TOKEN_FILE_ENV = "GWS_TOKEN_FILE"
+DEFAULT_TOKEN_FILE = BASE_DIR / "tokens.json"
+
+
+def _token_file() -> "Path | None":
+    env = os.environ.get(TOKEN_FILE_ENV, "").strip()
+    if env:
+        return Path(env).expanduser()
+    if DEFAULT_TOKEN_FILE.exists():
+        return DEFAULT_TOKEN_FILE
+    return None
+
+
+def _file_tokens() -> dict:
+    p = _token_file()
+    if p is None or not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text())
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _file_write(tokens: dict) -> None:
+    p = _token_file() or DEFAULT_TOKEN_FILE
+    p.write_text(json.dumps(tokens, indent=2))
+    try:
+        p.chmod(0o600)
+    except OSError:
+        pass
+
+
+def _store_get(email: str) -> "str | None":
+    if _token_file() is not None:
+        return _file_tokens().get(email)
+    return keyring.get_password(KEYRING_SERVICE, email)
+
+
+def _store_set(email: str, refresh_token: str) -> None:
+    if _token_file() is not None:
+        tokens = _file_tokens()
+        tokens[email] = refresh_token
+        _file_write(tokens)
+    else:
+        keyring.set_password(KEYRING_SERVICE, email, refresh_token)
+
+
+def _store_delete(email: str) -> None:
+    if _token_file() is not None:
+        tokens = _file_tokens()
+        if tokens.pop(email, None) is not None:
+            _file_write(tokens)
+    else:
+        try:
+            keyring.delete_password(KEYRING_SERVICE, email)
+        except keyring.errors.PasswordDeleteError:
+            pass
+
+
 def list_accounts() -> list[str]:
     """Return all account emails from the on-disk index.
 
@@ -130,7 +203,7 @@ def add_account(port: int = 0) -> dict:
     if not email:
         raise AccountError("OAuth succeeded but userinfo didn't return an email.")
 
-    keyring.set_password(KEYRING_SERVICE, email, creds.refresh_token or "")
+    _store_set(email, creds.refresh_token or "")
     _creds_cache.pop(email, None)  # drop any stale cached creds for a re-auth
     if not creds.refresh_token:
         raise AccountError(
@@ -149,10 +222,7 @@ def add_account(port: int = 0) -> dict:
 
 def remove_account(email: str) -> dict:
     email = email.lower().strip()
-    try:
-        keyring.delete_password(KEYRING_SERVICE, email)
-    except keyring.errors.PasswordDeleteError:
-        pass
+    _store_delete(email)
     index = [e for e in _load_index() if e != email]
     _save_index(index)
     _creds_cache.pop(email, None)
@@ -173,7 +243,7 @@ def _credentials_for(email: str) -> Credentials:
                 cached.refresh(Request())
                 return cached
 
-        refresh_token = keyring.get_password(KEYRING_SERVICE, email)
+        refresh_token = _store_get(email)
         if not refresh_token:
             raise AccountError(
                 f"No refresh token for {email}. Run gws_account_add to authorize it."
