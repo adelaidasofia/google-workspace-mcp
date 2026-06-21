@@ -149,17 +149,32 @@ Should return up to 5 compact message summaries.
 
 **"Invalid scope" on OAuth** — the scopes listed in step 3.3 don't match what `accounts.py` requests. Re-check the consent screen scopes.
 
-**Keychain password prompts every tool call** — macOS anchors an "Always Allow" grant to a stable code signature. On an ad-hoc-signed Python (e.g. a `uv`-managed interpreter — `codesign -dv` shows `Signature=adhoc`, no Team ID) the grant can't persist, so every keychain read re-prompts, once per account read. Credential caching (current versions) already drops this to at most one prompt per account per server start instead of one per call. To stop the prompts entirely, re-store each token allow-all:
+**Keychain password prompts every tool call** — macOS anchors an "Always Allow" grant to a stable code signature. On an ad-hoc-signed Python (e.g. a `uv`-managed interpreter — `codesign -dv` shows `Signature=adhoc`, no Team ID) the grant can't persist, so keychain reads re-prompt. Credential caching already cuts this to at most one prompt per account per server start (instead of one per call).
+
+**Definitive fix — skip the Keychain.** Set `GWS_TOKEN_FILE`, or just create `tokens.json` next to `accounts.py`, to store tokens in a chmod-600 JSON file instead of the OS keyring. A file has no per-app ACL or partition-list machinery, so no process ever prompts. Migrate existing tokens once:
 
 ```bash
-SVC=google-workspace-mcp
-for acct in you@example.com other@example.com; do
-  SECRET=$(security find-generic-password -s "$SVC" -a "$acct" -w) || continue
-  security delete-generic-password -s "$SVC" -a "$acct" >/dev/null 2>&1
-  security add-generic-password -s "$SVC" -a "$acct" -w "$SECRET" -A
+cd ~/.claude/google-workspace-mcp   # your install dir
+python3 - <<'PY'
+import json, subprocess, pathlib
+SVC = "google-workspace-mcp"
+out = {}
+for e in json.loads(pathlib.Path("accounts_index.json").read_text()):
+    tok = subprocess.run(["security","find-generic-password","-s",SVC,"-a",e,"-w"],
+                         capture_output=True, text=True).stdout.strip()
+    if tok:
+        out[e] = tok
+p = pathlib.Path("tokens.json"); p.write_text(json.dumps(out, indent=2)); p.chmod(0o600)
+print(f"migrated {len(out)} token(s)")
+PY
+# then remove the now-unused keychain items (optional, stops residual prompts)
+for e in $(python3 -c 'import json;print(" ".join(json.load(open("accounts_index.json"))))'); do
+  security delete-generic-password -s google-workspace-mcp -a "$e" >/dev/null 2>&1
 done
 ```
 
-`-A` lets any app running as your macOS user read the token without a prompt (you drop the per-app Keychain barrier — fine on a single-user machine, weigh it on shared ones). The Keychain Access GUI route ("allow `python3` / `fastmcp`") only sticks for a stably-signed Python; on a `uv`/ad-hoc interpreter the binary path also drifts on upgrade, so it usually won't.
+`tokens.json` is gitignored; keep it chmod 600 (readable only by your user — same practical exposure as an allow-all keychain item, minus the prompts).
+
+**Keychain-stays alternative** — re-store a token allow-all: `security add-generic-password -s google-workspace-mcp -a you@example.com -w "$TOKEN" -A`. Note `-A` sets the app ACL but *not* the partition list, so on some macOS versions an ad-hoc binary can still prompt on first access per process — the file backend avoids that entirely. The Keychain Access GUI route ("allow `python3` / `fastmcp`") only sticks for a stably-signed Python.
 
 **Sending from an alias fails with 400** — the alias isn't configured in Gmail's "Send mail as" settings for the authenticated mailbox. Open https://mail.google.com/mail/u/0/#settings/accounts and add it, or use `gmail_sendas_list` to see what's currently allowed.
