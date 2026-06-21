@@ -149,6 +149,17 @@ Should return up to 5 compact message summaries.
 
 **"Invalid scope" on OAuth** — the scopes listed in step 3.3 don't match what `accounts.py` requests. Re-check the consent screen scopes.
 
-**Keychain password prompts every tool call** — macOS is treating the stored secret as "read-only to the calling app." Open Keychain Access, search for `google-workspace-mcp`, right-click the entry, **Access Control**, allow `python3` / `fastmcp`. Or allow "all applications" (less strict).
+**Keychain password prompts every tool call** — macOS anchors an "Always Allow" grant to a stable code signature. On an ad-hoc-signed Python (e.g. a `uv`-managed interpreter — `codesign -dv` shows `Signature=adhoc`, no Team ID) the grant can't persist, so every keychain read re-prompts, once per account read. Credential caching (current versions) already drops this to at most one prompt per account per server start instead of one per call. To stop the prompts entirely, re-store each token allow-all:
+
+```bash
+SVC=google-workspace-mcp
+for acct in you@example.com other@example.com; do
+  SECRET=$(security find-generic-password -s "$SVC" -a "$acct" -w) || continue
+  security delete-generic-password -s "$SVC" -a "$acct" >/dev/null 2>&1
+  security add-generic-password -s "$SVC" -a "$acct" -w "$SECRET" -A
+done
+```
+
+`-A` lets any app running as your macOS user read the token without a prompt (you drop the per-app Keychain barrier — fine on a single-user machine, weigh it on shared ones). The Keychain Access GUI route ("allow `python3` / `fastmcp`") only sticks for a stably-signed Python; on a `uv`/ad-hoc interpreter the binary path also drifts on upgrade, so it usually won't.
 
 **Sending from an alias fails with 400** — the alias isn't configured in Gmail's "Send mail as" settings for the authenticated mailbox. Open https://mail.google.com/mail/u/0/#settings/accounts and add it, or use `gmail_sendas_list` to see what's currently allowed.
