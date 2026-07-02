@@ -1,8 +1,61 @@
 # Setup — Google Workspace MCP
 
-One-time setup: ~45-60 minutes. Do it once, every account you add after takes ~90 seconds.
+Two ways in:
 
-## 0. What you need
+- **Shared client (team / cohort)** — someone already created the OAuth app and handed you a `client_secret.json`. You skip Google Cloud Console entirely: jump to [Shared-client mode](#shared-client-mode-the-2-minute-path). ~2 minutes.
+- **Your own client (solo)** — you create your own Google Cloud project. Follow §0–§8 below. ~45–60 minutes once; every account you add after takes ~90 seconds.
+
+## Shared-client mode (the 2-minute path)
+
+Your team or program already created one OAuth app and will send you its `client_secret.json`. You do **not** touch Google Cloud Console. Three steps:
+
+**What you need**
+
+- The `client_secret.json` your program/admin sends you (over the private channel they specify — a group chat or DM, never a public link).
+- macOS (tokens live in the Apple Keychain by default).
+
+**1. Drop the file in place**
+
+```bash
+mkdir -p ~/.claude/google-workspace-mcp
+mv ~/Downloads/client_secret*.json ~/.claude/google-workspace-mcp/client_secret.json
+```
+
+Must be named exactly `client_secret.json` (same location §5 uses). The `.gitignore` keeps it out of any repo.
+
+**2. Authorize your own account**
+
+In Claude Code, run `/mcp` and confirm `google-workspace` is listed. Then, in a message:
+
+> Call gws_account_add
+
+A browser opens. Sign in with **your** Google account and grant every scope.
+
+**3. Clear the "Google hasn't verified this app" screen**
+
+The shared app runs in Testing mode, so Google shows an "unverified app" warning on first sign-in. This is expected — it is your program's own app, not a third party.
+
+- **Corporate Google account:** the warning disappears once your IT admin marks the app's **Client ID** as *Trusted* — that is the one pre-workshop request IT needs, and the program sends you the exact Client ID to hand them. If IT just approved it, give it ~15 minutes to propagate, then retry.
+- **Personal Gmail:** click **Advanced → Go to _(app name)_ (unsafe)** and continue. "Unverified" here only means the app is in Testing mode; you are authorizing your own account into your program's own app.
+
+Done — skip to [§7](#7-set-a-default-account-optional) and [§8](#8-verify) to set a default and confirm it works. You never needed §1–§6.
+
+> **"Access blocked: … has not completed verification"** with no Advanced link → your email is not on the shared app's test-user list. Ask your program/admin to add it (you cannot — you do not own the console).
+
+**Why sharing one `client_secret.json` is safe.** For a Desktop OAuth client the `client_secret` is a public-client identifier, not a confidential user secret — it cannot be kept secret on an end-user's machine, and Google treats it that way. Every member authorizes only their own Google account and gets their own refresh token stored locally; the shared client never grants cross-account access. Keep the file to your team's private channel regardless.
+
+### Running the shared client for a team (admin)
+
+One person creates the app once, then everyone else uses shared-client mode above:
+
+1. Do §1–§4 below (create project, enable APIs, consent screen, Desktop client).
+2. In §3 step 4 (**Test users**), add **every member's email** — Testing mode allows up to 100. Members who are not listed get "Access blocked".
+3. Distribute the downloaded `client_secret.json` to members over a private channel, and send the **Client ID** (from §4) alongside it — corporate members forward that Client ID to their IT to mark *Trusted*.
+4. Leave publishing status on **Testing**. Google verification is only required above 100 users.
+
+---
+
+## 0. What you need (solo path)
 
 - A Google account that can create Google Cloud projects (personal gmail works fine; no Workspace required to create the project).
 - macOS (the MCP stores tokens in the Apple Keychain).
