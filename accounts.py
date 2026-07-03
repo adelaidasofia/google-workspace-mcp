@@ -52,16 +52,23 @@ ACCOUNTS_INDEX_PATH = BASE_DIR / "accounts_index.json"
 
 KEYRING_SERVICE = "google-workspace-mcp"
 
+# Least-privilege scopes, audited against the actual tool call surface (each maps
+# to a real tool; see test_scopes.py). Deliberately NOT requested, to keep
+# corporate admin-consent an easy yes:
+#   - https://mail.google.com/ (full mailbox incl. IMAP/SMTP + permanent delete) —
+#     gmail.modify + gmail.send cover every Gmail tool (read, label, archive, trash, send).
+#   - drive.file (app-created files only) would be TOO narrow — the Drive tools
+#     browse + manage the user's EXISTING files + permissions, which requires full drive.
 SCOPES = [
-    "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/gmail.settings.basic",
-    "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/drive",
-    "https://www.googleapis.com/auth/documents",
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "openid",
+    "https://www.googleapis.com/auth/gmail.modify",       # read + batchModify labels, archive, trash
+    "https://www.googleapis.com/auth/gmail.send",          # send / reply / draft-send
+    "https://www.googleapis.com/auth/gmail.settings.basic",# list send-as aliases (settings().sendAs().list) — the ONLY settings use
+    "https://www.googleapis.com/auth/calendar",            # events read/write
+    "https://www.googleapis.com/auth/drive",               # list/export existing files + manage permissions (drive.file insufficient)
+    "https://www.googleapis.com/auth/documents",           # Google Docs read/write
+    "https://www.googleapis.com/auth/spreadsheets",        # Google Sheets read/write
+    "https://www.googleapis.com/auth/userinfo.email",      # account email claim (identity)
+    "openid",                                              # OIDC id_token
 ]
 
 DEFAULT_ACCOUNT_ENV = "GWS_DEFAULT_ACCOUNT"
