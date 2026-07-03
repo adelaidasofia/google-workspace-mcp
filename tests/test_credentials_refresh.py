@@ -113,3 +113,36 @@ def test_cached_path_expired_credentials_raise_actionable_account_error(
     # Broken cached creds evicted; dead stored token cleared.
     assert email not in accounts._creds_cache
     assert email not in json.loads(token_file.read_text())
+
+
+def test_non_grant_refresh_error_stays_readable_and_keeps_token(
+    tmp_path, monkeypatch
+):
+    """A RefreshError that is NOT invalid_grant (e.g. a transient upstream 5xx,
+    or a scope/client misconfig) must still surface a readable AccountError
+    instead of a raw stack trace, but must NOT delete the token: the grant may
+    be fine and the failure lies elsewhere, so nuking a possibly-good token
+    would be the wrong, destructive move."""
+    email = "student@example.com"
+    _install_client_secret(tmp_path, monkeypatch)
+
+    token_file = tmp_path / "tokens.json"
+    token_file.write_text(json.dumps({email: "still-good-refresh-token"}))
+    monkeypatch.setenv(accounts.TOKEN_FILE_ENV, str(token_file))
+    accounts._creds_cache.pop(email, None)
+
+    def _raise_non_grant_error(*_args, **_kwargs):
+        raise RefreshError(
+            "internal_failure: upstream 500",
+            {"error": "internal_failure"},
+        )
+
+    monkeypatch.setattr(accounts.Credentials, "refresh", _raise_non_grant_error)
+
+    with pytest.raises(accounts.AccountError) as exc:
+        accounts.service("gmail", "v1", account=email)
+
+    # Readable + actionable, never a raw RefreshError trace.
+    assert "gws_account_add" in str(exc.value)
+    # Token preserved: a non-grant failure must not delete a possibly-good token.
+    assert json.loads(token_file.read_text()) == {email: "still-good-refresh-token"}
