@@ -40,7 +40,7 @@ The shared app runs in Testing mode, so Google shows an "unverified app" warning
 
 Done — skip to [§7](#7-set-a-default-account-optional) and [§8](#8-verify) to set a default and confirm it works. You never needed §1–§6.
 
-> **"Access blocked: … has not completed verification"** with no Advanced link → your email is not on the shared app's test-user list. Ask your program/admin to add it (you cannot — you do not own the console).
+> **"Access blocked: … has not completed verification"** with no Advanced link → the app is still in **Testing** mode and your email is not on its test-user list. Ask your program/admin to either add you, or move the app's publishing status to **In production** (Google Cloud Console → Google Auth Platform → Audience → **Publish app**) — that drops the test-user list entirely, works for any Google account, and removes the 7-day refresh-token expiry Testing mode carries. Confirmed working: a non-test-user account can complete consent and use every scope, including Gmail and Drive, on an unverified production app (only the "Advanced → Continue" click changes, not the outcome). Reversible via "Back to testing" if you'd rather not.
 
 **Why sharing one `client_secret.json` is safe.** For a Desktop OAuth client the `client_secret` is a public-client identifier, not a confidential user secret — it cannot be kept secret on an end-user's machine, and Google treats it that way. Every member authorizes only their own Google account and gets their own refresh token stored locally; the shared client never grants cross-account access. Keep the file to your team's private channel regardless.
 
@@ -49,9 +49,9 @@ Done — skip to [§7](#7-set-a-default-account-optional) and [§8](#8-verify) t
 One person creates the app once, then everyone else uses shared-client mode above:
 
 1. Do §1–§4 below (create project, enable APIs, consent screen, Desktop client).
-2. In §3 step 4 (**Test users**), add **every member's email** — Testing mode allows up to 100. Members who are not listed get "Access blocked".
-3. Distribute the downloaded `client_secret.json` to members over a private channel, and send the **Client ID** (from §4) alongside it — corporate members forward that Client ID to their IT to mark *Trusted*.
-4. Leave publishing status on **Testing**. Google verification is only required above 100 users.
+2. For a small, fixed group, **Testing** mode works: in §3 step 4 (**Test users**), add every member's email (up to 100). Members who are not listed get "Access blocked".
+3. For an open or growing group (a public repo, a cohort with late signups, strangers you don't want to track by email), skip the test-user list — **publish the app** instead (Google Auth Platform → Audience → **Publish app**). Any Google account can then authorize with no roster to maintain and no 100-user cap on who's authorized (Google does cap unverified apps around 100 *total* grantees — verify if you expect to exceed that). The one-time "Google hasn't verified this app" click-through is unchanged either way.
+4. Distribute the credential file (see §4/§5 — Google removed client-secret download; you may need to reconstruct the JSON) to members over a private channel, and send the **Client ID** alongside it — corporate members forward that Client ID to their IT to mark *Trusted*. IT-Trust matters independent of Testing vs. production: it's what gets your app past a locked-down org's third-party-app policy, not what removes the unverified warning.
 
 ---
 
@@ -97,7 +97,7 @@ https://console.cloud.google.com/apis/credentials/consent
    - you@yourcompany.com
    - you@gmail.com
    - (any other real mailboxes you want to authorize)
-5. Publishing status: stays **Testing**. That is fine — test users can use it indefinitely. Only requires verification if you ship to >100 users.
+5. Publishing status: **Testing** is fine for a small, fixed group you'll list as test users — but note refresh tokens for external users expire **7 days** after issuance in Testing mode (you'll re-run `gws_account_add` weekly). If that's not what you want, **Publish app** (Audience → Publish app) instead: no test-user list, no 7-day expiry, works for any Google account, reversible via "Back to testing". Verification is only required to remove the "unverified" warning or exceed ~100 total unverified-app users — not to get non-expiring tokens.
 
 ## 4. Create an OAuth client ID
 
@@ -106,8 +106,19 @@ https://console.cloud.google.com/apis/credentials
 1. Click **Create Credentials → OAuth client ID**.
 2. Application type: **Desktop app**.
 3. Name: `google-workspace-mcp-desktop`.
-4. Click **Create**. A dialog shows the client ID + secret.
-5. Click **Download JSON**. Save the file — this is what the MCP reads.
+4. Click **Create**. A dialog shows the client ID + secret — copy the secret now, Google no longer offers a JSON download or a way to view it again later (if you lose it, click **Add secret** on the client's detail page to mint a new one).
+5. Build the credential file by hand at the path §5 expects:
+   ```json
+   {
+     "installed": {
+       "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
+       "client_secret": "YOUR_CLIENT_SECRET",
+       "redirect_uris": ["http://localhost"],
+       "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+       "token_uri": "https://oauth2.googleapis.com/token"
+     }
+   }
+   ```
 
 ## 5. Drop the credential file in place
 
