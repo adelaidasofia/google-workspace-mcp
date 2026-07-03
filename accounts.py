@@ -20,7 +20,7 @@ import json
 import os
 import threading
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, NoReturn
 
 _refresh_locks: dict[str, threading.Lock] = {}
 _refresh_locks_mu = threading.Lock()
@@ -41,6 +41,7 @@ def _get_refresh_lock(email: str) -> threading.Lock:
 _creds_cache: dict[str, "Credentials"] = {}
 
 import keyring
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -236,6 +237,41 @@ def remove_account(email: str) -> dict:
     return {"email": email, "status": "removed"}
 
 
+def _is_invalid_grant(err: RefreshError) -> bool:
+    """True when a refresh failed because the grant itself is dead: an expired
+    (7-day test-mode reset) or revoked refresh token, as opposed to a
+    misconfigured client or a transient transport error. google-auth passes the
+    parsed OAuth error payload as a RefreshError arg; fall back to message text.
+    """
+    for arg in getattr(err, "args", ()):  # e.g. ("invalid_grant: ...", {"error": ...})
+        if isinstance(arg, dict) and arg.get("error") == "invalid_grant":
+            return True
+    return "invalid_grant" in str(err)
+
+
+def _refresh_failed(email: str, err: RefreshError) -> NoReturn:
+    """Turn a raw RefreshError into an actionable AccountError (MYC-2602).
+
+    A dead grant (invalid_grant) cannot be salvaged, so forget the cached and
+    stored token (re-reading it just re-fails, and re-prompts the macOS
+    keychain) and tell the user the one command that fixes it. Any other
+    RefreshError keeps the token but still surfaces a readable message instead
+    of a raw OAuth stack trace.
+    """
+    _creds_cache.pop(email, None)
+    if _is_invalid_grant(err):
+        _store_delete(email)
+        raise AccountError(
+            f"Your Google login for {email} expired (test-mode OAuth apps "
+            f"reset the connection about weekly). Run gws_account_add to "
+            f"reconnect it."
+        ) from err
+    raise AccountError(
+        f"Couldn't refresh Google credentials for {email}: {err}. "
+        f"Run gws_account_add to re-authorize it."
+    ) from err
+
+
 def _credentials_for(email: str) -> Credentials:
     _check_client_secret()
     with _get_refresh_lock(email):
@@ -247,7 +283,10 @@ def _credentials_for(email: str) -> Credentials:
             if cached.valid:
                 return cached
             if cached.expired and cached.refresh_token:
-                cached.refresh(Request())
+                try:
+                    cached.refresh(Request())
+                except RefreshError as err:
+                    _refresh_failed(email, err)
                 return cached
 
         refresh_token = _store_get(email)
@@ -269,7 +308,10 @@ def _credentials_for(email: str) -> Credentials:
             client_secret=client_secret,
             scopes=SCOPES,
         )
-        creds.refresh(Request())
+        try:
+            creds.refresh(Request())
+        except RefreshError as err:
+            _refresh_failed(email, err)
         _creds_cache[email] = creds
         return creds
 
