@@ -84,7 +84,7 @@ def gmail_search(
     """Search Gmail messages. Returns compact shape (no body) — call gmail_read for body.
 
     Args:
-        query: Gmail search operators, e.g. 'from:sergio after:2026/04/01 is:unread'.
+        query: Gmail search operators, e.g. 'from:someone@example.com after:2026/04/01 is:unread'.
         account: Email address; defaults to configured default account.
         limit: 1-50. Default 10.
         include_spam_trash: Include SPAM/TRASH in results.
