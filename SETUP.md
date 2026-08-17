@@ -176,17 +176,28 @@ Your team or program already created one OAuth app and will send you its `client
 
 **What you need**
 
-- The `client_secret.json` your program/admin sends you (over the private channel they specify — a group chat or DM, never a public link).
+- The client ID + secret your program/admin sends you (over the private channel they specify — a group chat or DM, never a public link).
 - macOS (tokens live in the Apple Keychain by default).
 
-**1. Drop the file in place**
+**1. Hand the client to the server**
+
+Easiest: skip the file entirely and pass the pair on the register line (§5 Option A):
 
 ```bash
-mkdir -p ~/.claude/google-workspace-mcp
-mv ~/Downloads/client_secret*.json ~/.claude/google-workspace-mcp/client_secret.json
+claude mcp add google-workspace -s user \
+  -e GWS_CLIENT_ID=... \
+  -e GWS_CLIENT_SECRET=... \
+  -- /path/to/google-workspace-mcp/.venv/bin/python \
+     /path/to/google-workspace-mcp/server.py
 ```
 
-Must be named exactly `client_secret.json` (same location §5 uses). The `.gitignore` keeps it out of any repo.
+If your program sends a `client_secret.json` file instead, it must land **next to `server.py`** — that is the only place the server looks (`BASE_DIR` in `accounts.py`), whatever path the repo is checked out at:
+
+```bash
+mv ~/Downloads/client_secret*.json /path/to/google-workspace-mcp/client_secret.json
+```
+
+Must be named exactly `client_secret.json`. The `.gitignore` keeps it out of any repo.
 
 **2. Authorize your own account**
 
@@ -231,7 +242,7 @@ One person creates the app once, then everyone else uses shared-client mode abov
 **Definitive fix — skip the Keychain.** Set `GWS_TOKEN_FILE`, or just create `tokens.json` next to `accounts.py`, to store tokens in a chmod-600 JSON file instead of the OS keyring. A file has no per-app ACL or partition-list machinery, so no process ever prompts. Migrate existing tokens once:
 
 ```bash
-cd ~/.claude/google-workspace-mcp   # your install dir
+cd /path/to/google-workspace-mcp   # the dir holding accounts.py
 python3 - <<'PY'
 import json, subprocess, pathlib
 SVC = "google-workspace-mcp"
