@@ -1,4 +1,4 @@
-fastmcp>=3.4.6
+fastmcp>=3.4.7
 google-auth>=2.56.3
 google-auth-oauthlib>=1.4.0
 google-api-python-client>=2.198.0
