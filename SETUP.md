@@ -56,27 +56,40 @@ https://console.cloud.google.com/apis/credentials
 1. Click **Create Credentials → OAuth client ID**.
 2. Application type: **Desktop app**.
 3. Name: `google-workspace-mcp-desktop`.
-4. Click **Create**. A dialog shows the client ID + secret — copy the secret now, Google no longer offers a JSON download or a way to view it again later (if you lose it, click **Add secret** on the client's detail page to mint a new one).
-5. Build the credential file by hand at the path §5 expects:
-   ```json
-   {
-     "installed": {
-       "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
-       "client_secret": "YOUR_CLIENT_SECRET",
-       "redirect_uris": ["http://localhost"],
-       "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-       "token_uri": "https://oauth2.googleapis.com/token"
-     }
-   }
-   ```
+4. Click **Create**. A dialog shows the client ID + secret — copy **both** now, Google no longer offers a JSON download or a way to view the secret again later (if you lose it, click **Add secret** on the client's detail page to mint a new one).
 
-## 5. Drop the credential file in place
+## 5. Hand the client to the server
+
+Two ways. **Env vars are the shorter path and need no file at all** — the same shape [microsoft-365-mcp](https://github.com/adelaidasofia/microsoft-365-mcp) uses for `M365_CLIENT_ID`.
+
+**Option A — env vars (recommended).** Register the server with both values inline; nothing lands on disk:
 
 ```bash
-mv ~/Downloads/client_secret_*.json ~/.claude/google-workspace-mcp/client_secret.json
+claude mcp add google-workspace -s user \
+  -e GWS_CLIENT_ID=YOUR_CLIENT_ID.apps.googleusercontent.com \
+  -e GWS_CLIENT_SECRET=YOUR_CLIENT_SECRET \
+  -- /path/to/google-workspace-mcp/.venv/bin/python /path/to/google-workspace-mcp/server.py
+```
+
+`GWS_CLIENT_ID` and `GWS_CLIENT_SECRET` must be set **together**. Setting one alone is a hard error rather than a silent fall-back to the file, so a typo surfaces immediately instead of authorizing against the wrong client.
+
+**Option B — credential file.** Create `client_secret.json` next to `server.py` (env vars, when set, win over it):
+
+```json
+{
+  "installed": {
+    "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
+    "client_secret": "YOUR_CLIENT_SECRET",
+    "redirect_uris": ["http://localhost"],
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token"
+  }
+}
 ```
 
 Must be named exactly `client_secret.json`. The `.gitignore` keeps it out of any repo.
+
+For a Desktop OAuth client the `client_secret` is a public-client identifier, not a confidential user secret: it cannot be kept secret on an end user's machine and Google treats it that way. Either option carries the same exposure.
 
 ## 6. Authorize each real mailbox
 

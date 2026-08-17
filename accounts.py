@@ -74,6 +74,18 @@ SCOPES = [
 
 DEFAULT_ACCOUNT_ENV = "GWS_DEFAULT_ACCOUNT"
 
+# The OAuth client (a Desktop app) comes from env or from client_secret.json.
+# Env wins, so a client can register the connector in one command with no file on
+# disk — the shape microsoft-365-mcp already uses for M365_CLIENT_ID. For a
+# Desktop client the "secret" is a public-client identifier, not a user secret:
+# it cannot be kept secret on an end user's machine and Google treats it that
+# way. Both halves are required together; one alone is a misconfiguration, and
+# falling back to the file there would silently ignore what the caller asked for.
+CLIENT_ID_ENV = "GWS_CLIENT_ID"
+CLIENT_SECRET_ENV = "GWS_CLIENT_SECRET"
+AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
+TOKEN_URI = "https://oauth2.googleapis.com/token"
+
 
 class AccountError(Exception):
     """Raised when an account is missing, unauthorized, or can't be refreshed."""
@@ -189,12 +201,43 @@ def _resolve(account: str | None) -> str:
     return (account or "").strip() or default_account()
 
 
-def _check_client_secret() -> None:
-    if not CLIENT_SECRET_PATH.exists():
+def client_config() -> dict:
+    """Return the installed-app OAuth client config. Env wins over the file.
+
+    Raises AccountError when no client is configured, or when only one half of
+    the env pair is set (a typo there must fail loudly, not quietly fall back).
+    """
+    client_id = os.environ.get(CLIENT_ID_ENV, "").strip()
+    client_secret = os.environ.get(CLIENT_SECRET_ENV, "").strip()
+    if client_id and client_secret:
+        return {
+            "installed": {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uris": ["http://localhost"],
+                "auth_uri": AUTH_URI,
+                "token_uri": TOKEN_URI,
+            }
+        }
+    if client_id or client_secret:
+        missing = CLIENT_SECRET_ENV if client_id else CLIENT_ID_ENV
         raise AccountError(
-            f"Missing {CLIENT_SECRET_PATH}. Follow SETUP.md to create an OAuth "
-            "client in Google Cloud Console and drop the JSON here."
+            f"{missing} is not set. {CLIENT_ID_ENV} and {CLIENT_SECRET_ENV} must "
+            f"be set together, or unset both and use {CLIENT_SECRET_PATH}."
         )
+    if CLIENT_SECRET_PATH.exists():
+        try:
+            return json.loads(CLIENT_SECRET_PATH.read_text())
+        except json.JSONDecodeError as e:
+            raise AccountError(f"{CLIENT_SECRET_PATH} is not valid JSON: {e}") from e
+    raise AccountError(
+        f"No OAuth client configured. Set {CLIENT_ID_ENV} and {CLIENT_SECRET_ENV}, "
+        f"or create {CLIENT_SECRET_PATH}. See SETUP.md."
+    )
+
+
+def _check_client_secret() -> None:
+    client_config()
 
 
 def add_account(port: int = 0) -> dict:
@@ -202,8 +245,7 @@ def add_account(port: int = 0) -> dict:
 
     Call this once per account. Uses localhost redirect on a random port.
     """
-    _check_client_secret()
-    flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT_SECRET_PATH), SCOPES)
+    flow = InstalledAppFlow.from_client_config(client_config(), SCOPES)
     creds = flow.run_local_server(port=port, open_browser=True, prompt="consent")
 
     userinfo = build("oauth2", "v2", credentials=creds).userinfo().get().execute()
@@ -295,7 +337,7 @@ def _credentials_for(email: str) -> Credentials:
                 f"No refresh token for {email}. Run gws_account_add to authorize it."
             )
 
-        client_cfg = json.loads(CLIENT_SECRET_PATH.read_text())
+        client_cfg = client_config()
         installed = client_cfg.get("installed") or client_cfg.get("web") or {}
         client_id = installed.get("client_id")
         client_secret = installed.get("client_secret")
