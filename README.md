@@ -29,14 +29,14 @@ message/file bodies by default.
 - **Keychain-backed**: Refresh tokens live in the macOS Keychain, not plaintext
   files. No tokens in the vault, no tokens in any repo.
 
-## Tools (v2, 61 tools)
+## Tools (v2, 63 tools)
 
 ### Account management (3)
 - `gws_account_add` — browser OAuth flow, adds a new authorized mailbox
 - `gws_account_list` — list authorized accounts + default
 - `gws_account_remove` — remove local credential (doesn't revoke Google-side)
 
-### Gmail (10)
+### Gmail (12)
 - `gmail_search` — search with Gmail operators. Compact response.
 - `gmail_read` — read one message or full thread. Bodies opt-in.
 - `gmail_send` — send mail, optional `from_alias` for Send-As identities
@@ -47,6 +47,8 @@ message/file bodies by default.
 - `gmail_archive` — batch archive (remove INBOX)
 - `gmail_trash` — batch move to trash
 - `gmail_sendas_list` — list Send-As identities on this mailbox
+- `gmail_attachments_list` — list a message's attachments (filename, mime type, size)
+- `gmail_attachment_save` — download one attachment to a local file, path returned for direct reading
 
 ### Calendar (7)
 - `cal_list_calendars` — list all calendars

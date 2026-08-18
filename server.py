@@ -216,6 +216,32 @@ def gmail_trash(message_ids: list[str], account: str | None = None) -> dict:
 
 
 @mcp.tool()
+def gmail_attachments_list(message_id: str, account: str | None = None) -> list[dict]:
+    """List a message's attachments: filename, mime type, size, and the
+    attachment_id gmail_attachment_save needs. Metadata only, no download."""
+    return gmail_tools.attachments_list(message_id=message_id, account=account)
+
+
+@mcp.tool()
+def gmail_attachment_save(
+    message_id: str,
+    attachment_id: str,
+    filename: str | None = None,
+    dest_dir: str | None = None,
+    account: str | None = None,
+) -> dict:
+    """Download one attachment to a local file and return its path, so the
+    caller can read it directly (PDF, image, docx, ...).
+
+    Call gmail_attachments_list first for attachment_id and filename. Saves
+    under ~/.claude/google-workspace-mcp/downloads unless dest_dir is given."""
+    return gmail_tools.attachment_save(
+        message_id=message_id, attachment_id=attachment_id,
+        filename=filename, dest_dir=dest_dir, account=account,
+    )
+
+
+@mcp.tool()
 def gmail_sendas_list(account: str | None = None) -> list[dict]:
     """List Send-As identities for this account (the aliases it can send as)."""
     return gmail_tools.sendas_list(account=account)
