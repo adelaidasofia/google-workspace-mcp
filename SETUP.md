@@ -152,6 +152,25 @@ export GWS_DEFAULT_ACCOUNT="you@yourcompany.com"
 
 Every `gmail_*` and `cal_*` tool takes an optional `account` param that overrides this.
 
+### Time zone
+
+Calendar times you write without a UTC offset — `2026-08-18T09:00:00`, and the
+`today` / `tomorrow` shortcuts — mean that time **where you are**. Your zone is
+read from the machine (`/etc/localtime`, or `TZ`), so most people set nothing.
+
+Override it when the machine is wrong, or when it will not say (some containers
+and corporate images), in which case it falls back to UTC:
+
+```bash
+export GWS_TIME_ZONE="America/Caracas"
+```
+
+Use an [IANA name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones),
+not an abbreviation or an offset. `cal_create_event`, `cal_update_event`,
+`cal_list_events` and `cal_freebusy` each take a `time_zone` param for a
+one-off. A time you write *with* an offset (`2026-08-18T09:00:00-04:00`) is
+taken exactly as given and ignores all of this.
+
 ## 8. Verify
 
 ```
