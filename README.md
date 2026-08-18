@@ -106,6 +106,23 @@ message/file bodies by default.
 
 ## Install
 
+**Fastest path — one script, no manual wiring:**
+
+```bash
+git clone https://github.com/adelaidasofia/google-workspace-mcp.git
+bash google-workspace-mcp/install.sh
+```
+
+`install.sh` creates an isolated venv, installs dependencies, takes your
+Google OAuth client (either interactively or via `GWS_CLIENT_ID` /
+`GWS_CLIENT_SECRET` in the environment), and registers the server with
+Claude Code. Safe to re-run. You still need a Google OAuth client first —
+see [SETUP.md](SETUP.md) for the ~45 min one-time GCP setup. Then run
+`gws_account_add` from Claude Code to authorize your first mailbox.
+
+<details>
+<summary>Plugin marketplace install</summary>
+
 Open Claude Code, paste:
 
     /plugin marketplace add adelaidasofia/google-workspace-mcp
@@ -115,6 +132,8 @@ You still need to complete the one-time GCP setup in [SETUP.md](SETUP.md)
 (~45 min for v1, ~5 min incremental for v2 Drive/Docs/Sheets) so the
 server has a `client_secret.json` to OAuth against. Run `gws_account_add`
 from Claude Code to authorize your first mailbox.
+
+</details>
 
 <details>
 <summary>Legacy install (manual <code>.mcp.json</code> wiring)</summary>
