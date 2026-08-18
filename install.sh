@@ -65,15 +65,76 @@ command -v git >/dev/null 2>&1 || die \
 "git is not installed.
    Run  xcode-select --install  , let it finish, then run this script again."
 
-command -v python3 >/dev/null 2>&1 || die \
+# Pick an interpreter, rather than testing only the first `python3` on PATH.
+#
+# On macOS `python3` is usually /usr/bin/python3 (3.9, too old) even when a
+# perfectly good python3.14 sits in /opt/homebrew/bin, because /usr/bin comes
+# earlier in PATH. Stopping at that first answer sent people off to python.org
+# to install a Python they already had. So try the version-suffixed names too,
+# newest first.
+#
+# `python3` is tried first on purpose: where it already qualifies it stays the
+# interpreter, so this changes nothing for anyone the installer already worked
+# for. GWS_PYTHON overrides the lot, for a Python that lives somewhere no
+# search would guess (pyenv, conda, a private prefix).
+PY=""
+PY_VER=""
+PY_SEEN=""
+
+py_version_of() { # py_version_of <interpreter> -> "3.12", or nothing
+  "$1" -c 'import sys;print("%d.%d"%sys.version_info[:2])' 2>/dev/null || true
+}
+
+py_new_enough() { # py_new_enough <interpreter>
+  "$1" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3,10) else 1)' >/dev/null 2>&1
+}
+
+# An explicit override is handled on its own, and its problems are fatal:
+# quietly searching on past a GWS_PYTHON that turned out to be wrong would
+# install against a different interpreter than the one that was asked for,
+# which is the same silent-wrong-answer this whole block exists to stop.
+if [ -n "${GWS_PYTHON:-}" ]; then
+  PY="$(command -v "$GWS_PYTHON" 2>/dev/null || true)"
+  [ -n "$PY" ] || die \
+"GWS_PYTHON is set to \"$GWS_PYTHON\", but there is no such interpreter.
+   Unset it, or point it at a real python3."
+  py_new_enough "$PY" || die \
+"GWS_PYTHON points at Python $(py_version_of "$PY"), but 3.10 or newer is needed."
+  PY_VER="$(py_version_of "$PY")"
+fi
+
+if [ -z "$PY" ]; then
+  for candidate in python3 python3.14 python3.13 python3.12 python3.11 python3.10; do
+    # `command -v` resolves names on PATH and absolute paths alike.
+    resolved="$(command -v "$candidate" 2>/dev/null || true)"
+    [ -n "$resolved" ] || continue
+    found_ver="$(py_version_of "$resolved")"
+    [ -n "$found_ver" ] || continue
+    # Remember every version seen, so a total miss can say what was rejected
+    # instead of just naming whichever happened to be first.
+    case " $PY_SEEN " in *" $found_ver "*) ;; *) PY_SEEN="$PY_SEEN $found_ver" ;; esac
+    if py_new_enough "$resolved"; then
+      PY="$resolved"
+      PY_VER="$found_ver"
+      break
+    fi
+  done
+fi
+
+if [ -z "$PY" ]; then
+  [ -n "$PY_SEEN" ] || die \
 "python3 is not installed.
    Run  xcode-select --install  , let it finish, then run this script again."
-
-PY_OK=$(python3 -c 'import sys; print(1 if sys.version_info[:2] >= (3,10) else 0)' 2>/dev/null || echo 0)
-[ "$PY_OK" = "1" ] || die \
-"python3 is version $(python3 -c 'import sys;print("%d.%d"%sys.version_info[:2])' 2>/dev/null || echo unknown), but 3.10 or newer is needed.
-   Install a newer Python from python.org, then run this script again."
-ok "python3 $(python3 -c 'import sys;print("%d.%d"%sys.version_info[:2])')"
+  die \
+"No Python 3.10 or newer was found, but 3.10 or newer is needed.
+   Looked for: python3, python3.14, python3.13, python3.12, python3.11, python3.10.
+   Versions found:$PY_SEEN
+   Install a newer one, then run this script again:
+     brew install python@3.12      (or download it from python.org)
+   Already have one somewhere unusual? Point at it directly:
+     GWS_PYTHON=/full/path/to/python3 bash install.sh"
+fi
+ok "python3 $PY_VER  ($PY)"
 
 command -v claude >/dev/null 2>&1 || die \
 "Claude Code is not installed, or its 'claude' command is not on your PATH.
@@ -90,8 +151,20 @@ step "Installing the connector (about a minute)"
 
 # A venv is not optional here: Homebrew and python.org interpreters are marked
 # externally-managed (PEP 668), so a plain `pip install` refuses outright.
+# A venv left behind by a too-old interpreter fails much later, at `import
+# server`, with nothing useful to read. Rebuild it instead. Only a definite
+# answer counts: an interpreter that cannot report its version is left alone
+# rather than deleted.
+if [ -x "$VENV_PY" ]; then
+  VENV_VER="$(py_version_of "$VENV_PY")"
+  if [ -n "$VENV_VER" ] && ! py_new_enough "$VENV_PY"; then
+    warn "the existing environment runs Python $VENV_VER — rebuilding it with $PY_VER"
+    rm -rf "$VENV_DIR"
+  fi
+fi
+
 if [ ! -x "$VENV_PY" ]; then
-  python3 -m venv "$VENV_DIR" || die \
+  "$PY" -m venv "$VENV_DIR" || die \
 "Could not create the virtual environment in $VENV_DIR.
    If that folder half-exists, delete it and run this script again."
 fi

@@ -6,12 +6,53 @@ attendee photos, conference phone numbers, or recurrence rules unless asked.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import os
+from datetime import datetime, timedelta
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from accounts import service
 
-DEFAULT_TZ = "America/Bogota"
+# Last resort, reached only when the machine will not say where it is and
+# nothing was configured. UTC is the honest answer to "I don't know" -- it is
+# obviously wrong to whoever reads it back, where a plausible-looking city
+# would just be quietly wrong. Set GWS_TIME_ZONE to settle it.
+FALLBACK_TZ = "UTC"
+
+
+def _is_zone(name: str) -> bool:
+    try:
+        ZoneInfo(name)
+        return True
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        return False
+
+
+def _local_tz_name() -> str:
+    """The machine's IANA zone, e.g. 'America/Caracas'.
+
+    Every naive time a person types is resolved here, so guessing wrong moves
+    real meetings. Order: an explicit GWS_TIME_ZONE, then TZ, then whatever
+    /etc/localtime points at (macOS and Linux both symlink it into the zoneinfo
+    tree), then the fallback.
+    """
+    for candidate in (os.environ.get("GWS_TIME_ZONE"), os.environ.get("TZ")):
+        if candidate and _is_zone(candidate):
+            return candidate
+    try:
+        parts = Path("/etc/localtime").resolve().parts
+        if "zoneinfo" in parts:
+            name = "/".join(parts[parts.index("zoneinfo") + 1 :])
+            if name and _is_zone(name):
+                return name
+    except OSError:
+        pass
+    return FALLBACK_TZ
+
+
+DEFAULT_TZ = _local_tz_name()
 
 
 # ---------------------------------------------------------------------------
@@ -19,28 +60,57 @@ DEFAULT_TZ = "America/Bogota"
 # ---------------------------------------------------------------------------
 
 
-def _parse_time(value: str) -> str:
-    """Normalize a user-supplied time string to RFC3339 for Google Calendar."""
+@lru_cache(maxsize=None)
+def _zone(name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, OSError) as e:
+        raise ValueError(
+            f"Unknown time zone {name!r}. Use an IANA name like 'America/Caracas'. "
+            "On Windows the zone database is a separate package: pip install tzdata."
+        ) from e
+
+
+def _parse_dt(value: str, tz_name: str | None = None) -> datetime:
+    """Parse a user-supplied time into an aware datetime.
+
+    A time with no offset ("2026-08-18T09:00:00") means nine in the morning
+    where the person is, so it is resolved in `tz_name`. Stamping it as UTC
+    instead silently moved events by the size of the local offset -- and
+    because Google lets the offset inside dateTime override the separate
+    timeZone field, setting timeZone correctly did not save it. It created
+    without an error, which is why this went unnoticed.
+
+    A time that already carries an offset is authoritative and passes through
+    untouched.
+    """
+    tz = _zone(tz_name or DEFAULT_TZ)
+
     value = value.strip()
     if not value:
         raise ValueError("Empty time value")
 
-    shortcuts = {
-        "now": datetime.now(timezone.utc),
-        "today": datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0),
-        "tomorrow": datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        + timedelta(days=1),
-    }
-    if value.lower() in shortcuts:
-        return shortcuts[value.lower()].isoformat()
+    key = value.lower()
+    if key in ("now", "today", "tomorrow"):
+        now = datetime.now(tz)
+        if key == "now":
+            return now
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return midnight if key == "today" else midnight + timedelta(days=1)
 
+    normalized = value[:-1] + "+00:00" if value[-1:] in ("Z", "z") else value
     try:
-        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.isoformat()
+        dt = datetime.fromisoformat(normalized)
     except ValueError as e:
-        raise ValueError(f"Can't parse time '{value}'. Use ISO 8601 or 'now'/'today'/'tomorrow'.") from e
+        raise ValueError(
+            f"Can't parse time '{value}'. Use ISO 8601 or 'now'/'today'/'tomorrow'."
+        ) from e
+    return dt.replace(tzinfo=tz) if dt.tzinfo is None else dt
+
+
+def _parse_time(value: str, tz_name: str | None = None) -> str:
+    """Normalize a user-supplied time string to RFC3339 for Google Calendar."""
+    return _parse_dt(value, tz_name).isoformat()
 
 
 def _summarize_event(event: dict, verbose: bool = False) -> dict:
@@ -105,13 +175,19 @@ def list_events(
     query: str | None = None,
     max_results: int = 25,
     verbose: bool = False,
+    time_zone: str | None = None,
 ) -> list[dict]:
     svc = service("calendar", "v3", account=account)
-    t_min = _parse_time(time_min)
+    # 'today' has to mean today where the person is. Anchored to UTC instead,
+    # the window opens in yesterday evening for everyone west of Greenwich and
+    # the day comes back missing its last few hours.
+    dt_min = _parse_dt(time_min, time_zone)
+    t_min = dt_min.isoformat()
     if time_max:
-        t_max = _parse_time(time_max)
+        t_max = _parse_time(time_max, time_zone)
     else:
-        t_max = (datetime.fromisoformat(t_min.replace("Z", "+00:00")) + timedelta(days=days_ahead)).isoformat()
+        # astimezone re-normalizes the offset if the window crosses a DST change.
+        t_max = (dt_min + timedelta(days=days_ahead)).astimezone(dt_min.tzinfo).isoformat()
 
     params: dict[str, Any] = {
         "calendarId": calendar_id,
@@ -137,16 +213,20 @@ def create_event(
     description: str | None = None,
     location: str | None = None,
     attendees: list[str] | None = None,
-    time_zone: str = DEFAULT_TZ,
+    time_zone: str | None = None,
     send_updates: str = "all",
     add_meet: bool = False,
 ) -> dict:
     svc = service("calendar", "v3", account=account)
+    # One zone for both halves: the offset written into dateTime has to agree
+    # with timeZone, because Google resolves the event by the offset and keeps
+    # timeZone only for expanding recurrences.
+    tz = time_zone or DEFAULT_TZ
 
     body: dict[str, Any] = {
         "summary": summary,
-        "start": {"dateTime": _parse_time(start), "timeZone": time_zone},
-        "end": {"dateTime": _parse_time(end), "timeZone": time_zone},
+        "start": {"dateTime": _parse_time(start, tz), "timeZone": tz},
+        "end": {"dateTime": _parse_time(end, tz), "timeZone": tz},
     }
     if description:
         body["description"] = description
@@ -181,18 +261,19 @@ def update_event(
     location: str | None = None,
     attendees_add: list[str] | None = None,
     attendees_remove: list[str] | None = None,
-    time_zone: str = DEFAULT_TZ,
+    time_zone: str | None = None,
     send_updates: str = "all",
 ) -> dict:
     svc = service("calendar", "v3", account=account)
     event = svc.events().get(calendarId=calendar_id, eventId=event_id).execute()
+    tz = time_zone or DEFAULT_TZ
 
     if summary is not None:
         event["summary"] = summary
     if start is not None:
-        event["start"] = {"dateTime": _parse_time(start), "timeZone": time_zone}
+        event["start"] = {"dateTime": _parse_time(start, tz), "timeZone": tz}
     if end is not None:
-        event["end"] = {"dateTime": _parse_time(end), "timeZone": time_zone}
+        event["end"] = {"dateTime": _parse_time(end, tz), "timeZone": tz}
     if description is not None:
         event["description"] = description
     if location is not None:
@@ -234,6 +315,7 @@ def freebusy(
     time_max: str,
     account: str | None = None,
     emails: list[str] | None = None,
+    time_zone: str | None = None,
 ) -> dict:
     """Check busy windows for a set of calendars. emails defaults to [account]."""
     svc = service("calendar", "v3", account=account)
@@ -242,8 +324,8 @@ def freebusy(
         svc.freebusy()
         .query(
             body={
-                "timeMin": _parse_time(time_min),
-                "timeMax": _parse_time(time_max),
+                "timeMin": _parse_time(time_min, time_zone),
+                "timeMax": _parse_time(time_max, time_zone),
                 "items": items,
             }
         )

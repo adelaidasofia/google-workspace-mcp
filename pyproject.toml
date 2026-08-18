@@ -13,6 +13,8 @@ dependencies = [
     "google-auth-oauthlib>=1.4.0",
     "google-api-python-client>=2.198.0",
     "keyring>=25.7.0",
+    # zoneinfo has no system tz database on Windows.
+    "tzdata>=2024.1; sys_platform == 'win32'",
 ]
 
 # Flat layout (modules at repo root). List them explicitly so the editable

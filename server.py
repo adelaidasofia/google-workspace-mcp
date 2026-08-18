@@ -268,19 +268,23 @@ def cal_list_events(
     query: str | None = None,
     max_results: int = 25,
     verbose: bool = False,
+    time_zone: str | None = None,
 ) -> list[dict]:
     """List events on a calendar.
 
     Args:
-        time_min: ISO 8601 or 'now'/'today'/'tomorrow'.
+        time_min: ISO 8601 or 'now'/'today'/'tomorrow'. A time with no UTC
+            offset, and 'today'/'tomorrow', mean local time in time_zone.
         time_max: ISO 8601. If omitted, uses time_min + days_ahead.
         query: Free-text search within event titles/descriptions.
         verbose: Include description, attendees, recurrence, conference data.
+        time_zone: IANA name, e.g. 'America/Caracas'. Defaults to the machine's
+            own zone (override with the GWS_TIME_ZONE environment variable).
     """
     return calendar_tools.list_events(
         account=account, calendar_id=calendar_id, time_min=time_min,
         time_max=time_max, days_ahead=days_ahead, query=query,
-        max_results=max_results, verbose=verbose,
+        max_results=max_results, verbose=verbose, time_zone=time_zone,
     )
 
 
@@ -294,14 +298,19 @@ def cal_create_event(
     description: str | None = None,
     location: str | None = None,
     attendees: list[str] | None = None,
-    time_zone: str = "America/Bogota",
+    time_zone: str | None = None,
     send_updates: str = "all",
     add_meet: bool = False,
 ) -> dict:
     """Create a calendar event.
 
     Args:
-        start, end: ISO 8601 (or 'now'/'today'/'tomorrow').
+        start, end: ISO 8601 (or 'now'/'today'/'tomorrow'). Written without a
+            UTC offset ('2026-08-18T09:00:00') they mean that wall-clock time
+            in time_zone, which is almost always what a person means. Include
+            an offset ('...T09:00:00-04:00') to pin an exact instant.
+        time_zone: IANA name, e.g. 'America/Caracas'. Defaults to the machine's
+            own zone (override with the GWS_TIME_ZONE environment variable).
         send_updates: 'all' | 'externalOnly' | 'none'.
         add_meet: Attach a Google Meet link.
     """
@@ -325,10 +334,14 @@ def cal_update_event(
     location: str | None = None,
     attendees_add: list[str] | None = None,
     attendees_remove: list[str] | None = None,
-    time_zone: str = "America/Bogota",
+    time_zone: str | None = None,
     send_updates: str = "all",
 ) -> dict:
-    """Partial-update an event. Only pass fields you want to change."""
+    """Partial-update an event. Only pass fields you want to change.
+
+    start/end follow the same rule as cal_create_event: no UTC offset means
+    that wall-clock time in time_zone, which defaults to the machine's own zone.
+    """
     return calendar_tools.update_event(
         event_id=event_id, account=account, calendar_id=calendar_id,
         summary=summary, start=start, end=end, description=description,
@@ -358,14 +371,18 @@ def cal_freebusy(
     time_max: str,
     account: str | None = None,
     emails: list[str] | None = None,
+    time_zone: str | None = None,
 ) -> dict:
     """Check busy windows for one or more calendars (for scheduling).
 
     Args:
         emails: List of calendar IDs / emails. Defaults to ['primary'].
+        time_zone: IANA name. Times with no UTC offset are read in this zone,
+            which defaults to the machine's own.
     """
     return calendar_tools.freebusy(
         time_min=time_min, time_max=time_max, account=account, emails=emails,
+        time_zone=time_zone,
     )
 
 
