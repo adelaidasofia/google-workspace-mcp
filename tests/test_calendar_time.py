@@ -41,7 +41,7 @@ def test_naive_and_explicit_offset_agree():
 
 def test_naive_time_is_never_silently_utc():
     """The specific regression: a zone that is not UTC must not yield +00:00."""
-    for zone in (CARACAS, "America/Bogota", "Asia/Tokyo", "Europe/Madrid"):
+    for zone in (CARACAS, "America/Lima", "Asia/Tokyo", "Europe/Madrid"):
         out = C._parse_time("2026-08-18T09:00:00", zone)
         assert not out.endswith("+00:00"), f"{zone} fell back to UTC: {out}"
         assert out.startswith("2026-08-18T09:00:00"), out

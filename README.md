@@ -122,6 +122,15 @@ Claude Code. Safe to re-run. You still need a Google OAuth client first —
 see [SETUP.md](SETUP.md) for the ~45 min one-time GCP setup. Then run
 `gws_account_add` from Claude Code to authorize your first mailbox.
 
+It needs Python 3.10 or newer and will find one you already have: it tries
+`python3` first, then `python3.14` down to `python3.10`, so a Homebrew Python
+still counts when `python3` resolves to macOS's older system one. If yours
+lives somewhere no search would guess (pyenv, conda, a private prefix), name it:
+
+```bash
+GWS_PYTHON=/full/path/to/python3 bash google-workspace-mcp/install.sh
+```
+
 <details>
 <summary>Plugin marketplace install</summary>
 
