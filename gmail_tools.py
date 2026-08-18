@@ -431,3 +431,71 @@ def trash(message_ids: list[str], account: str | None = None) -> dict:
     for mid in message_ids:
         svc.users().messages().trash(userId="me", id=mid).execute()
     return {"count": len(message_ids), "status": "trashed"}
+
+
+_DOWNLOADS_DIR = pathlib.Path.home() / ".claude" / "google-workspace-mcp" / "downloads"
+
+
+def _walk_attachment_parts(payload: dict) -> list[dict]:
+    """Recursively collect MIME parts that carry a filename + attachmentId —
+    the multipart tree can nest (mixed > alternative > related), so a flat
+    scan of payload["parts"] misses attachments buried under a nested part."""
+    found = []
+    filename = payload.get("filename")
+    body = payload.get("body") or {}
+    if filename and body.get("attachmentId"):
+        found.append(
+            {
+                "attachment_id": body["attachmentId"],
+                "filename": filename,
+                "mime_type": payload.get("mimeType", "application/octet-stream"),
+                "size": body.get("size", 0),
+            }
+        )
+    for part in payload.get("parts") or []:
+        found.extend(_walk_attachment_parts(part))
+    return found
+
+
+def attachments_list(message_id: str, account: str | None = None) -> list[dict]:
+    """List a message's attachments: filename, mime type, size, and the
+    attachment_id attachment_save needs. Metadata only — no bytes fetched."""
+    svc = service("gmail", "v1", account=account)
+    msg = svc.users().messages().get(userId="me", id=message_id, format="full").execute()
+    return _walk_attachment_parts(msg.get("payload") or {})
+
+
+def attachment_save(
+    message_id: str,
+    attachment_id: str,
+    filename: str | None = None,
+    dest_dir: str | None = None,
+    account: str | None = None,
+) -> dict:
+    """Download one attachment to a local file and return its path.
+
+    Call attachments_list first for attachment_id and the original filename.
+    Saves under ~/.claude/google-workspace-mcp/downloads by default; pass
+    dest_dir to save elsewhere. The returned path can be read directly (PDF,
+    image, docx, ...) — this tool does not parse the content, only fetches it.
+    """
+    svc = service("gmail", "v1", account=account)
+    att = (
+        svc.users()
+        .messages()
+        .attachments()
+        .get(userId="me", messageId=message_id, id=attachment_id)
+        .execute()
+    )
+    data = att.get("data", "")
+    # Gmail's attachment payload is base64url, often without the '=' padding
+    # urlsafe_b64decode requires — pad out to a multiple of 4 before decoding.
+    padded = data + "=" * (-len(data) % 4)
+    raw = base64.urlsafe_b64decode(padded)
+
+    out_dir = pathlib.Path(dest_dir) if dest_dir else _DOWNLOADS_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    name = filename or f"attachment-{attachment_id[:8]}"
+    path = out_dir / name
+    path.write_bytes(raw)
+    return {"path": str(path), "filename": name, "bytes": len(raw)}
