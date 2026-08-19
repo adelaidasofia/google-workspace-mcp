@@ -7,19 +7,17 @@ reads are opt-in via structured=True.
 
 from __future__ import annotations
 
-import datetime
-import pathlib
 from typing import Any
 
+import audit
 from accounts import service
 
-_AUDIT_LOG = pathlib.Path.home() / ".claude" / "google-workspace-mcp" / "audit.log"
-
-
-def _audit(action: str, detail: str) -> None:
-    ts = datetime.datetime.utcnow().isoformat() + "Z"
-    with open(_AUDIT_LOG, "a") as f:
-        f.write(f"{ts}\t{action}\t{detail}\n")
+# The write-audit log lives in audit.py: one implementation instead of three
+# identical copies that each had to be fixed separately (missing parent dir,
+# locale-encoded writes). Re-exported so `_audit(...)` call sites below and
+# the modules' own tests keep working unchanged.
+_AUDIT_LOG = audit.LOG_PATH
+_audit = audit.record
 
 
 def _flatten(body: dict) -> str:

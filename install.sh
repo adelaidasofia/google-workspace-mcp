@@ -57,6 +57,27 @@ confirm_yes() { # confirm_yes <question> -> 0 if yes
 printf '\n%s  Google Workspace MCP  %s\n' "$B" "$R"
 printf '%s  Gmail, Calendar, Drive, Docs and Sheets, connected to Claude Code.%s\n' "$DIM" "$R"
 
+# Windows has its own installer, and this one cannot stand in for it.
+#
+# Under Git Bash / MSYS this script gets far enough to look like it worked and
+# then registers something unusable: the venv interpreter is Scripts/python.exe
+# rather than bin/python, and the POSIX paths handed to `claude` -- a native
+# Windows program -- go through MSYS's argument rewriting, which is a guess,
+# not a guarantee. Better to stop here and name the script that is right.
+#
+# Only Git Bash / MSYS / Cygwin match. WSL reports Linux and is real Linux, so
+# it keeps using this script.
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  MINGW*|MSYS*|CYGWIN*)
+    die \
+"This is the macOS and Linux installer, and you are on Windows.
+   Use install.ps1 instead. In PowerShell, from the folder above this one:
+
+     powershell -ExecutionPolicy Bypass -File .\\google-workspace-mcp\\install.ps1
+
+   It does the same thing, with the paths and the Python that Windows uses." ;;
+esac
+
 # ---------------------------------------------------------------- 1. tooling
 
 step "Checking what you already have"

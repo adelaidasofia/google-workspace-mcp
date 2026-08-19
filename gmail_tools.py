@@ -13,22 +13,21 @@ Design rules:
 from __future__ import annotations
 
 import base64
-import datetime
 import pathlib
 import re
 from email.message import EmailMessage
 from email.utils import parseaddr
 from typing import Any
 
+import audit
 from accounts import service
 
-_AUDIT_LOG = pathlib.Path.home() / ".claude" / "google-workspace-mcp" / "audit.log"
-
-
-def _audit(action: str, detail: str) -> None:
-    ts = datetime.datetime.utcnow().isoformat() + "Z"
-    with open(_AUDIT_LOG, "a") as f:
-        f.write(f"{ts}\t{action}\t{detail}\n")
+# The write-audit log lives in audit.py: one implementation instead of three
+# identical copies that each had to be fixed separately (missing parent dir,
+# locale-encoded writes). Re-exported so `_audit(...)` call sites below and
+# the modules' own tests keep working unchanged.
+_AUDIT_LOG = audit.LOG_PATH
+_audit = audit.record
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +434,65 @@ def trash(message_ids: list[str], account: str | None = None) -> dict:
 
 _DOWNLOADS_DIR = pathlib.Path.home() / ".claude" / "google-workspace-mcp" / "downloads"
 
+# Characters Windows forbids in a filename, plus the separators every platform
+# forbids. NUL is in here for the same reason it is on POSIX.
+_ILLEGAL_NAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+# Device names Windows reserves at every directory level, with or without an
+# extension: opening CON.txt talks to the console, not to a file.
+_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+
+def _safe_filename(name: str, fallback: str) -> str:
+    """Turn a sender-controlled attachment filename into a safe leaf name.
+
+    The name in a MIME part is whatever the sender put there, so it is neither
+    trusted nor portable:
+
+      - `../../.ssh/authorized_keys` writes outside dest_dir. Only the leaf is
+        kept, so a path there collapses to its last component.
+      - `Q3: results?.pdf` is a perfectly ordinary macOS filename and an
+        invalid Windows one -- `:` and `?` raise OSError [Errno 22] on NTFS.
+      - `CON`, `NUL`, `COM1` are Windows device names at every directory level.
+      - A trailing dot or space is silently stripped by the Win32 layer, so
+        "report." and "report" become the same file without anyone saying so.
+
+    Everything rejected is replaced rather than dropped, so two attachments
+    whose names differ only in illegal characters do not collide.
+    """
+    # Both separators, because a Windows-shaped name can arrive on macOS.
+    leaf = name.replace("\\", "/").rsplit("/", 1)[-1].strip()
+    leaf = _ILLEGAL_NAME_CHARS.sub("_", leaf)
+    # "." and ".." survive the above intact and are directories, not files.
+    if set(leaf) <= {"."}:
+        leaf = ""
+    # Only the trailing kind matters: Windows keeps leading dots.
+    leaf = leaf.rstrip(". ")
+    if leaf.split(".", 1)[0].upper() in _RESERVED_NAMES:
+        leaf = f"_{leaf}"
+    # 255 is the per-component limit nearly everywhere, counted in bytes on
+    # ext4 and in UTF-16 units on NTFS. Trimming by bytes satisfies both, and
+    # the extension is kept rather than the tail of the stem because it is what
+    # decides how the file opens.
+    stem, dot, ext = leaf.rpartition(".")
+    if dot and len(ext.encode()) < 32:
+        leaf = _clip(stem, 254 - len(ext.encode())) + "." + ext
+    else:
+        leaf = _clip(leaf, 255)
+    return leaf or fallback
+
+
+def _clip(text: str, limit: int) -> str:
+    """Trim to `limit` UTF-8 bytes without splitting a character in half."""
+    encoded = text.encode()
+    if len(encoded) <= limit:
+        return text
+    return encoded[:limit].decode(errors="ignore")
+
 
 def _walk_attachment_parts(payload: dict) -> list[dict]:
     """Recursively collect MIME parts that carry a filename + attachmentId —
@@ -493,9 +551,10 @@ def attachment_save(
     padded = data + "=" * (-len(data) % 4)
     raw = base64.urlsafe_b64decode(padded)
 
-    out_dir = pathlib.Path(dest_dir) if dest_dir else _DOWNLOADS_DIR
+    out_dir = pathlib.Path(dest_dir).expanduser() if dest_dir else _DOWNLOADS_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
-    name = filename or f"attachment-{attachment_id[:8]}"
+    fallback = f"attachment-{attachment_id[:8]}"
+    name = _safe_filename(filename or fallback, fallback)
     path = out_dir / name
     path.write_bytes(raw)
     return {"path": str(path), "filename": name, "bytes": len(raw)}

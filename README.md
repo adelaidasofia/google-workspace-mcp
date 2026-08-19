@@ -26,8 +26,10 @@ message/file bodies by default.
 - **Token-efficient**: Search/list returns compact shapes (`{id, from, subject,
   snippet, ...}` for mail, `{id, name, mime, modified, size, ...}` for Drive).
   Bodies and file content are opt-in.
-- **Keychain-backed**: Refresh tokens live in the macOS Keychain, not plaintext
-  files. No tokens in the vault, no tokens in any repo.
+- **Keyring-backed**: Refresh tokens live in the OS credential store — Keychain
+  on macOS, Credential Manager on Windows, Secret Service on Linux — not in
+  plaintext files. No tokens in the vault, no tokens in any repo.
+- **macOS, Windows and Linux**: one installer per platform, same connector.
 
 ## Tools (v2, 63 tools)
 
@@ -108,28 +110,70 @@ message/file bodies by default.
 
 ## Install
 
-**Fastest path — one script, no manual wiring:**
+**Fastest path — one script, no manual wiring.**
+
+macOS and Linux:
 
 ```bash
 git clone https://github.com/adelaidasofia/google-workspace-mcp.git
 bash google-workspace-mcp/install.sh
 ```
 
-`install.sh` creates an isolated venv, installs dependencies, takes your
+Windows (PowerShell):
+
+```powershell
+git clone https://github.com/adelaidasofia/google-workspace-mcp.git
+powershell -ExecutionPolicy Bypass -File .\google-workspace-mcp\install.ps1
+```
+
+The installer creates an isolated venv, installs dependencies, takes your
 Google OAuth client (either interactively or via `GWS_CLIENT_ID` /
 `GWS_CLIENT_SECRET` in the environment), and registers the server with
 Claude Code. Safe to re-run. You still need a Google OAuth client first —
 see [SETUP.md](SETUP.md) for the ~45 min one-time GCP setup. Then run
 `gws_account_add` from Claude Code to authorize your first mailbox.
 
-It needs Python 3.10 or newer and will find one you already have: it tries
-`python3` first, then `python3.14` down to `python3.10`, so a Homebrew Python
-still counts when `python3` resolves to macOS's older system one. If yours
-lives somewhere no search would guess (pyenv, conda, a private prefix), name it:
+Both need Python 3.10 or newer and will find one you already have.
+
+- **macOS / Linux** try `python3` first, then `python3.14` down to
+  `python3.10`, so a Homebrew Python still counts when `python3` resolves to
+  macOS's older system one.
+- **Windows** tries `py -3` (the Python launcher) first, then `python`,
+  `python3` and the versioned names. Every candidate has to run and report its
+  own version before it counts, which is what keeps the Microsoft Store
+  placeholder in `%LOCALAPPDATA%\Microsoft\WindowsApps` from being picked: it
+  is a real `python.exe` on `PATH` that only opens the Store.
+
+If yours lives somewhere no search would guess (pyenv, conda, a private
+prefix), name it:
 
 ```bash
 GWS_PYTHON=/full/path/to/python3 bash google-workspace-mcp/install.sh
 ```
+
+```powershell
+$env:GWS_PYTHON = 'C:\full\path\to\python.exe'
+powershell -ExecutionPolicy Bypass -File .\google-workspace-mcp\install.ps1
+```
+
+<details>
+<summary>Windows notes</summary>
+
+**`-ExecutionPolicy Bypass` is in the command on purpose.** Windows blocks
+downloaded scripts by default; this applies the exception to this one run
+without changing the machine's policy.
+
+**Run it from PowerShell, not Git Bash.** `install.sh` detects Git Bash / MSYS
+and stops there with a pointer to `install.ps1`, rather than registering a
+POSIX venv path that a native Claude Code cannot launch. WSL is real Linux and
+keeps using `install.sh`.
+
+**Time zone.** The connector reads the machine's IANA zone so that "3pm" in a
+`cal_*` call means 3pm where you are. Windows names its zones its own way
+(`SA Western Standard Time`), so this goes through `tzlocal`, which the
+installer pulls in. Set `GWS_TIME_ZONE=America/Bogota` to override.
+
+</details>
 
 <details>
 <summary>Plugin marketplace install</summary>
@@ -143,6 +187,13 @@ You still need to complete the one-time GCP setup in [SETUP.md](SETUP.md)
 (~45 min for v1, ~5 min incremental for v2 Drive/Docs/Sheets) so the
 server has a `client_secret.json` to OAuth against. Run `gws_account_add`
 from Claude Code to authorize your first mailbox.
+
+**On Windows, run `install.ps1` afterwards.** The plugin's `.mcp.json` launches
+the server with `python3`, and a plugin manifest has no way to say "except on
+Windows, use this instead". On Windows `python3` is either absent or the
+Microsoft Store placeholder, so the connector is registered and never starts.
+`install.ps1` re-registers it against an absolute interpreter path, which is
+unambiguous on every platform.
 
 </details>
 
@@ -165,6 +216,17 @@ Add to your project's `.mcp.json` (or `~/.claude.json` for global access):
   "type": "stdio",
   "command": "python3",
   "args": ["/path/to/google-workspace-mcp/server.py"]
+}
+```
+
+On Windows, give the full path to a real interpreter rather than a bare name —
+`python3` there is usually the Microsoft Store placeholder, which resolves fine
+and never runs Python:
+```json
+"google-workspace": {
+  "type": "stdio",
+  "command": "C:\\Users\\you\\google-workspace-mcp\\.venv\\Scripts\\python.exe",
+  "args": ["C:\\Users\\you\\google-workspace-mcp\\server.py"]
 }
 ```
 

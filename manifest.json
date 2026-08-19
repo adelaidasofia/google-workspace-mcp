@@ -3,7 +3,7 @@
   "name": "google-workspace-mcp",
   "display_name": "Multi-account MCP for Gmail, Calendar, Drive, Docs, and Sheets \u2014 61 tools, token",
   "version": "0.1.0",
-  "description": "Multi-account MCP for Gmail, Calendar, Drive, Docs, and Sheets \u2014 61 tools, token-efficient, macOS Keychain-backed.",
+  "description": "Multi-account MCP for Gmail, Calendar, Drive, Docs, and Sheets \u2014 61 tools, token-efficient, OS keyring-backed. macOS, Windows and Linux.",
   "author": {
     "name": "adelaidasofia",
     "url": "https://github.com/adelaidasofia"

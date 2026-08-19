@@ -27,7 +27,15 @@ INSTALL_SH = REPO_ROOT / "install.sh"
 ID = "1234567890-abc.apps.googleusercontent.com"
 SECRET = "GOCSPX-averyrealisticlookingsecret"
 
-pytestmark = pytest.mark.skipif(not INSTALL_SH.exists(), reason="no install.sh here")
+pytestmark = [
+    pytest.mark.skipif(not INSTALL_SH.exists(), reason="no install.sh here"),
+    # Git Bash can run install.sh on Windows, but install.sh now refuses to run
+    # there on purpose (it would register a POSIX venv path a native Claude
+    # Code cannot use) and points at install.ps1 instead. Exercising it here
+    # would only re-test that refusal, which test_install_ps1.py covers from
+    # the side that matters.
+    pytest.mark.skipif(os.name == "nt", reason="POSIX installer; see test_install_ps1.py"),
+]
 
 
 def _exe(path: Path, body: str) -> None:

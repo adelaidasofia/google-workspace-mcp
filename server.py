@@ -9,7 +9,8 @@ Two design goals:
 2. Token-efficient. Search/list tools return compact shapes. Bodies and file
    content are opt-in via include_content / format params.
 
-Keychain service name: `google-workspace-mcp` (see accounts.py KEYRING_SERVICE).
+Keyring service name: `google-workspace-mcp` (see accounts.py KEYRING_SERVICE).
+That is Keychain on macOS, Credential Manager on Windows, Secret Service on Linux.
 See SETUP.md for GCP OAuth setup; see README.md for day-to-day usage.
 """
 
@@ -41,10 +42,11 @@ mcp = FastMCP("google-workspace")
 @mcp.tool()
 def gws_account_add() -> dict:
     """Authorize a new Google account via browser OAuth. Stores the refresh
-    token in the macOS Keychain (service: onde-google-workspace-mcp).
+    token in the OS keyring (service: google-workspace-mcp) -- Keychain on
+    macOS, Credential Manager on Windows, Secret Service on Linux.
 
-    Requires client_secret.json at ~/.claude/google-workspace-mcp/client_secret.json.
-    See SETUP.md.
+    Requires the OAuth client: GWS_CLIENT_ID + GWS_CLIENT_SECRET in the
+    environment, or client_secret.json next to server.py. See SETUP.md.
     """
     return accounts.add_account()
 

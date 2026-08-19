@@ -1,3 +1,5 @@
+# The isolated environment install.sh / install.ps1 build in this folder.
+.venv/
 client_secret.json
 accounts_index.json
 tokens.json

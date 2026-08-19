@@ -2,7 +2,8 @@
 
 Refresh tokens live in one of two backends (see _token_file): the OS keyring
 (default — service name "google-workspace-mcp" / KEYRING_SERVICE, encrypted at
-rest), or a chmod-600 JSON file when GWS_TOKEN_FILE is set or tokens.json
+rest — Keychain on macOS, Credential Manager on Windows, Secret Service on
+Linux), or an owner-only JSON file when GWS_TOKEN_FILE is set or tokens.json
 exists next to this module. The file backend avoids the macOS Keychain's
 per-app authorization prompts, which never persist on an ad-hoc-signed
 interpreter (e.g. a uv-managed Python). Tokens are keyed by account email.
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import threading
 from pathlib import Path
 from typing import Iterable, NoReturn
@@ -95,18 +97,21 @@ def _load_index() -> list[str]:
     if not ACCOUNTS_INDEX_PATH.exists():
         return []
     try:
-        return json.loads(ACCOUNTS_INDEX_PATH.read_text())
+        return json.loads(ACCOUNTS_INDEX_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return []
 
 
 def _save_index(emails: Iterable[str]) -> None:
-    ACCOUNTS_INDEX_PATH.write_text(json.dumps(sorted(set(emails)), indent=2))
+    ACCOUNTS_INDEX_PATH.write_text(
+        json.dumps(sorted(set(emails)), indent=2), encoding="utf-8"
+    )
 
 
 # --- Token storage backend ------------------------------------------------
 # Default: the OS keyring (cross-platform, encrypted at rest). Opt-in: a
-# chmod-600 JSON file ({email: refresh_token}). File mode skips the macOS
+# JSON file ({email: refresh_token}), locked to the owner (chmod 600 on
+# macOS and Linux, an owner-only ACL on Windows). File mode skips the macOS
 # Keychain entirely, so there are no per-app ACL / partition-list prompts —
 # the failure mode when the server runs on an ad-hoc-signed interpreter whose
 # signature can't anchor a persistent "Always Allow". File mode is active when
@@ -130,19 +135,58 @@ def _file_tokens() -> dict:
     if p is None or not p.exists():
         return {}
     try:
-        data = json.loads(p.read_text())
+        data = json.loads(p.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except (json.JSONDecodeError, OSError):
         return {}
 
 
-def _file_write(tokens: dict) -> None:
-    p = _token_file() or DEFAULT_TOKEN_FILE
-    p.write_text(json.dumps(tokens, indent=2))
+def _restrict_to_owner(p: Path) -> None:
+    """Make the token file readable only by the user who owns it.
+
+    chmod is the whole story on macOS and Linux. On Windows it is close to a
+    no-op: the CRT maps mode 0o600 onto the single read-only attribute and
+    ignores the group and other bits entirely, so a file the comment calls
+    "chmod 600" is in fact readable by every other account on the machine and
+    by anything running as them. Nothing raises, which is the problem -- the
+    call appears to have worked.
+
+    So on Windows the ACL is what has to change: drop inheritance from the
+    parent directory (which is where the broad grants come from) and grant
+    full control to this user alone. icacls ships with Windows and is the
+    supported way to do this without a pywin32 dependency.
+
+    Best effort by design. A path on a filesystem with no ACLs (a FAT USB
+    stick, some network shares) cannot be restricted, and refusing to store the
+    token there would be worse than storing it; the keyring backend, which is
+    the default on Windows, is the answer for anyone who needs the guarantee.
+    """
     try:
         p.chmod(0o600)
     except OSError:
         pass
+    if os.name != "nt":
+        return
+    user = os.environ.get("USERNAME") or ""
+    if not user:
+        return
+    domain = os.environ.get("USERDOMAIN") or ""
+    account = f"{domain}\\{user}" if domain else user
+    try:
+        subprocess.run(
+            ["icacls", str(p), "/inheritance:r", "/grant:r", f"{account}:(F)"],
+            check=False,
+            capture_output=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _file_write(tokens: dict) -> None:
+    p = _token_file() or DEFAULT_TOKEN_FILE
+    p.write_text(json.dumps(tokens, indent=2), encoding="utf-8")
+    _restrict_to_owner(p)
 
 
 def _store_get(email: str) -> "str | None":
@@ -227,7 +271,7 @@ def client_config() -> dict:
         )
     if CLIENT_SECRET_PATH.exists():
         try:
-            return json.loads(CLIENT_SECRET_PATH.read_text())
+            return json.loads(CLIENT_SECRET_PATH.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
             raise AccountError(f"{CLIENT_SECRET_PATH} is not valid JSON: {e}") from e
     raise AccountError(
