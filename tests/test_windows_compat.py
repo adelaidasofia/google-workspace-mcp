@@ -13,6 +13,7 @@ Most of these tests run on every platform on purpose. A guard that only runs on
 the machine that already broke is a guard nobody sees go red.
 """
 
+import datetime
 import os
 import sys
 from pathlib import Path
@@ -71,8 +72,14 @@ def test_a_naive_time_lands_in_the_local_zone_not_utc(monkeypatch):
     monkeypatch.delenv("GWS_TIME_ZONE", raising=False)
     monkeypatch.delenv("TZ", raising=False)
     zone = C._local_tz_name()
-    if zone == "UTC":
-        pytest.skip("machine really is on UTC, so there is nothing to tell apart")
+
+    # Skip on the offset, not on the name. A CI runner set to UTC reports
+    # "Etc/UTC", so comparing the string against "UTC" let this run on a
+    # machine where +00:00 is the right answer and then failed it for that.
+    when = datetime.datetime(2026, 8, 18, 9)
+    if C._zone(zone).utcoffset(when) == datetime.timedelta(0):
+        pytest.skip(f"machine really is on {zone}, so there is nothing to tell apart")
+
     stamped = C._parse_time("2026-08-18T09:00:00", zone)
     assert stamped.startswith("2026-08-18T09:00:00")
     assert not stamped.endswith("+00:00")
