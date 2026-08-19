@@ -10,22 +10,20 @@ Design rules:
 
 from __future__ import annotations
 
-import datetime
 import io
-import pathlib
 from typing import Any
 
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 
+import audit
 from accounts import service
 
-_AUDIT_LOG = pathlib.Path.home() / ".claude" / "google-workspace-mcp" / "audit.log"
-
-
-def _audit(action: str, detail: str) -> None:
-    ts = datetime.datetime.utcnow().isoformat() + "Z"
-    with open(_AUDIT_LOG, "a") as f:
-        f.write(f"{ts}\t{action}\t{detail}\n")
+# The write-audit log lives in audit.py: one implementation instead of three
+# identical copies that each had to be fixed separately (missing parent dir,
+# locale-encoded writes). Re-exported so `_audit(...)` call sites below and
+# the modules' own tests keep working unchanged.
+_AUDIT_LOG = audit.LOG_PATH
+_audit = audit.record
 
 # Map Google-native mime types to sensible export formats
 GOOGLE_NATIVE_EXPORT = {

@@ -8,7 +8,8 @@ Two ways in:
 ## 0. What you need (solo path)
 
 - A Google account that can create Google Cloud projects (personal gmail works fine; no Workspace required to create the project).
-- macOS (the MCP stores tokens in the Apple Keychain).
+- macOS, Windows or Linux. Tokens go in the OS credential store: Keychain
+  on macOS, Credential Manager on Windows, Secret Service on Linux.
 
 ## 1. Create a Google Cloud project
 
@@ -144,11 +145,21 @@ refresh token's scope silently.)
 
 ## 7. Set a default account (optional)
 
-The first authorized account becomes default automatically. To override, add to `~/.zshrc`:
+The first authorized account becomes default automatically. To override,
+set `GWS_DEFAULT_ACCOUNT` — in `~/.zshrc` on macOS:
 
 ```bash
 export GWS_DEFAULT_ACCOUNT="you@yourcompany.com"
 ```
+
+On Windows, set it for your user so every Claude Code session sees it:
+
+```powershell
+[Environment]::SetEnvironmentVariable('GWS_DEFAULT_ACCOUNT', 'you@yourcompany.com', 'User')
+```
+
+Either way it can also go on the register line as another `-e` pair, which
+is the one place that works identically on every platform.
 
 Every `gmail_*` and `cal_*` tool takes an optional `account` param that overrides this.
 
@@ -156,13 +167,20 @@ Every `gmail_*` and `cal_*` tool takes an optional `account` param that override
 
 Calendar times you write without a UTC offset — `2026-08-18T09:00:00`, and the
 `today` / `tomorrow` shortcuts — mean that time **where you are**. Your zone is
-read from the machine (`/etc/localtime`, or `TZ`), so most people set nothing.
+read from the machine — `TZ`, then `/etc/localtime` on macOS and Linux, then
+`tzlocal` (which is how Windows answers, since it has no `/etc/localtime` and
+names its zones `SA Western Standard Time` rather than `America/Bogota`). Most
+people set nothing.
 
 Override it when the machine is wrong, or when it will not say (some containers
 and corporate images), in which case it falls back to UTC:
 
 ```bash
 export GWS_TIME_ZONE="America/Caracas"
+```
+
+```powershell
+[Environment]::SetEnvironmentVariable('GWS_TIME_ZONE', 'America/Caracas', 'User')
 ```
 
 Use an [IANA name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones),
@@ -196,7 +214,7 @@ Your team or program already created one OAuth app and will send you its `client
 **What you need**
 
 - The client ID + secret your program/admin sends you (over the private channel they specify — a group chat or DM, never a public link).
-- macOS (tokens live in the Apple Keychain by default).
+- macOS, Windows or Linux (tokens live in the OS credential store by default).
 
 **1. Hand the client to the server**
 
@@ -208,6 +226,20 @@ claude mcp add google-workspace -s user \
   -e GWS_CLIENT_SECRET=... \
   -- /path/to/google-workspace-mcp/.venv/bin/python \
      /path/to/google-workspace-mcp/server.py
+```
+
+On Windows the venv interpreter is `.venv\Scripts\python.exe`, and this has
+to be run from PowerShell rather than Git Bash — PowerShell drops a bare `--`
+when it calls the `claude.ps1` shim, so the separator never reaches Claude
+Code and the server command is registered wrong. `install.ps1` handles all of
+that; this is the manual equivalent:
+
+```powershell
+claude.cmd mcp add google-workspace -s user `
+  -e GWS_CLIENT_ID=... `
+  -e GWS_CLIENT_SECRET=... `
+  -- C:\path\to\google-workspace-mcp\.venv\Scripts\python.exe `
+     C:\path\to\google-workspace-mcp\server.py
 ```
 
 If your program sends a `client_secret.json` file instead, it must land **next to `server.py`** — that is the only place the server looks (`BASE_DIR` in `accounts.py`), whatever path the repo is checked out at:
@@ -258,7 +290,9 @@ One person creates the app once, then everyone else uses shared-client mode abov
 
 **Keychain password prompts every tool call** — macOS anchors an "Always Allow" grant to a stable code signature. On an ad-hoc-signed Python (e.g. a `uv`-managed interpreter — `codesign -dv` shows `Signature=adhoc`, no Team ID) the grant can't persist, so keychain reads re-prompt. Credential caching already cuts this to at most one prompt per account per server start (instead of one per call).
 
-**Definitive fix — skip the Keychain.** Set `GWS_TOKEN_FILE`, or just create `tokens.json` next to `accounts.py`, to store tokens in a chmod-600 JSON file instead of the OS keyring. A file has no per-app ACL or partition-list machinery, so no process ever prompts. Migrate existing tokens once:
+*(This whole section is macOS-only. Windows Credential Manager and Linux's Secret Service do not prompt per app, so there is nothing to work around there — stay on the default keyring backend.)*
+
+**Definitive fix — skip the Keychain.** Set `GWS_TOKEN_FILE`, or just create `tokens.json` next to `accounts.py`, to store tokens in an owner-only JSON file instead of the OS keyring. A file has no per-app ACL or partition-list machinery, so no process ever prompts. Migrate existing tokens once:
 
 ```bash
 cd /path/to/google-workspace-mcp   # the dir holding accounts.py
@@ -280,7 +314,7 @@ for e in $(python3 -c 'import json;print(" ".join(json.load(open("accounts_index
 done
 ```
 
-`tokens.json` is gitignored; keep it chmod 600 (readable only by your user — same practical exposure as an allow-all keychain item, minus the prompts).
+`tokens.json` is gitignored; keep it chmod 600 (readable only by your user — same practical exposure as an allow-all keychain item, minus the prompts). On Windows `chmod` cannot express that — it only flips the read-only attribute — so the server restricts the file with an owner-only ACL (`icacls /inheritance:r`) after every write. A filesystem with no ACLs at all (a FAT stick, some network shares) cannot be restricted either way, which is a reason to leave `GWS_TOKEN_FILE` unset on Windows and stay on Credential Manager.
 
 **Keychain-stays alternative** — re-store a token allow-all: `security add-generic-password -s google-workspace-mcp -a you@example.com -w "$TOKEN" -A`. Note `-A` sets the app ACL but *not* the partition list, so on some macOS versions an ad-hoc binary can still prompt on first access per process — the file backend avoids that entirely. The Keychain Access GUI route ("allow `python3` / `fastmcp`") only sticks for a stably-signed Python.
 

@@ -30,25 +30,67 @@ def _is_zone(name: str) -> bool:
         return False
 
 
+def _tz_from_etc_localtime() -> str | None:
+    """The zone macOS and Linux both encode as a symlink into the tz tree."""
+    try:
+        parts = Path("/etc/localtime").resolve().parts
+    except OSError:
+        return None
+    if "zoneinfo" not in parts:
+        return None
+    name = "/".join(parts[parts.index("zoneinfo") + 1 :])
+    return name if name and _is_zone(name) else None
+
+
+def _tz_from_tzlocal() -> str | None:
+    """The zone tzlocal reads out of the platform's own settings.
+
+    This is the only tier that answers on Windows, which has no /etc/localtime
+    and names its zones in its own vocabulary ("SA Western Standard Time")
+    rather than IANA's. tzlocal reads the registry and maps it through the CLDR
+    table; asking it directly for a ZoneInfo name is far better than shipping a
+    copy of that mapping here and letting it rot.
+
+    Imported lazily and defensively: it is a dependency, but an install that
+    predates it must degrade to the fallback rather than fail to start.
+    """
+    try:
+        import tzlocal
+    except ImportError:
+        return None
+    try:
+        name = tzlocal.get_localzone_name()
+    except Exception:  # noqa: BLE001 - tzlocal raises several unrelated types
+        return None
+    return name if name and _is_zone(name) else None
+
+
 def _local_tz_name() -> str:
     """The machine's IANA zone, e.g. 'America/Caracas'.
 
     Every naive time a person types is resolved here, so guessing wrong moves
-    real meetings. Order: an explicit GWS_TIME_ZONE, then TZ, then whatever
-    /etc/localtime points at (macOS and Linux both symlink it into the zoneinfo
-    tree), then the fallback.
+    real meetings. Order: an explicit GWS_TIME_ZONE, then TZ, then
+    /etc/localtime, then tzlocal, then the fallback.
+
+    The tzlocal tier is what makes this correct on Windows. Before it, every
+    Windows install fell all the way through to UTC and quietly booked "3pm"
+    at 3pm UTC -- the same class of bug as the naive-datetime one these zones
+    exist to fix, and just as silent: nothing raises, the event is created, and
+    only the hour is wrong. Note that the UTC fallback is a real zone, so a
+    test that only asserts "the default is a valid zone" stays green through
+    the whole failure. What is asserted instead is that a machine whose zone is
+    knowable does not answer UTC.
+
+    /etc/localtime is kept ahead of tzlocal so nothing changes for the macOS
+    and Linux installs that already resolve correctly today.
     """
     for candidate in (os.environ.get("GWS_TIME_ZONE"), os.environ.get("TZ")):
         if candidate and _is_zone(candidate):
             return candidate
-    try:
-        parts = Path("/etc/localtime").resolve().parts
-        if "zoneinfo" in parts:
-            name = "/".join(parts[parts.index("zoneinfo") + 1 :])
-            if name and _is_zone(name):
-                return name
-    except OSError:
-        pass
+    for probe in (_tz_from_etc_localtime, _tz_from_tzlocal):
+        found = probe()
+        if found:
+            return found
     return FALLBACK_TZ
 
 

@@ -1,0 +1,25 @@
+# Line endings, pinned per file type rather than left to each clone.
+#
+# Git for Windows defaults to core.autocrlf=true, which rewrites every text
+# file to CRLF on checkout. For install.sh that is fatal and the error does not
+# say so: bash reads the shebang as "/usr/bin/env bash\r" and reports
+# "bad interpreter: no such file or directory" for an interpreter that is
+# plainly there. Same story for the hook scripts.
+#
+# Declaring it here means the answer no longer depends on how each person
+# happens to have configured their git.
+
+*           text=auto eol=lf
+
+*.sh        text eol=lf
+*.py        text eol=lf
+
+# PowerShell and batch are read by Windows tools, which want CRLF. .ps1 in
+# particular must stay ASCII-only as well -- see the header in install.ps1.
+*.ps1       text eol=crlf
+*.cmd       text eol=crlf
+*.bat       text eol=crlf
+
+*.png       binary
+*.jpg       binary
+*.mcpb      binary

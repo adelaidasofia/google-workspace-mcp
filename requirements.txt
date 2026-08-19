@@ -3,5 +3,9 @@ google-auth>=2.56.3
 google-auth-oauthlib>=1.4.0
 google-api-python-client>=2.198.0
 keyring>=25.7.0
+# Local IANA zone on Windows, which has no /etc/localtime and names zones
+# its own way ("SA Western Standard Time"). Without it every naive time a
+# person types resolves as UTC. Cheap and correct on macOS/Linux too.
+tzlocal>=5.0
 # zoneinfo has no system tz database on Windows; harmless elsewhere.
 tzdata>=2024.1; sys_platform == "win32"
