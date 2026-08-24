@@ -14,7 +14,7 @@ dependencies = [
     "google-api-python-client>=2.198.0",
     "keyring>=25.7.0",
     # Local IANA zone on Windows, which has no /etc/localtime.
-    "tzlocal>=5.0",
+    "tzlocal>=5.4.4",
     # zoneinfo has no system tz database on Windows.
     "tzdata>=2024.1; sys_platform == 'win32'",
 ]
