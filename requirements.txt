@@ -1,7 +1,7 @@
 fastmcp>=3.4.7
 google-auth>=2.56.3
 google-auth-oauthlib>=1.4.0
-google-api-python-client>=2.198.0
+google-api-python-client>=2.199.0
 keyring>=25.7.0
 # Local IANA zone on Windows, which has no /etc/localtime and names zones
 # its own way ("SA Western Standard Time"). Without it every naive time a
