@@ -8,4 +8,4 @@ keyring>=25.7.0
 # person types resolves as UTC. Cheap and correct on macOS/Linux too.
 tzlocal>=5.0
 # zoneinfo has no system tz database on Windows; harmless elsewhere.
-tzdata>=2024.1; sys_platform == "win32"
+tzdata>=2026.3; sys_platform == "win32"
