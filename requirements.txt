@@ -6,6 +6,6 @@ keyring>=25.7.0
 # Local IANA zone on Windows, which has no /etc/localtime and names zones
 # its own way ("SA Western Standard Time"). Without it every naive time a
 # person types resolves as UTC. Cheap and correct on macOS/Linux too.
-tzlocal>=5.0
+tzlocal>=5.4.4
 # zoneinfo has no system tz database on Windows; harmless elsewhere.
 tzdata>=2026.3; sys_platform == "win32"
