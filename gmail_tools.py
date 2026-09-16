@@ -179,9 +179,14 @@ def search(
     # — observed 2026-05-25 when email-triage requested PER_ACCOUNT_LIMIT=120).
     # Chunk into pages of <=100 and concatenate the results.
     fetched: dict[str, dict] = {}
+    failed: dict[str, str] = {}
 
     def _collect(req_id: str, response: dict | None, exception: Exception | None) -> None:
-        if exception is None and response is not None:
+        if exception is not None:
+            failed[req_id] = f"{type(exception).__name__}: {exception}"
+        elif response is None:
+            failed[req_id] = "empty response without exception"
+        else:
             fetched[req_id] = response
 
     GMAIL_BATCH_MAX = 100
@@ -199,6 +204,18 @@ def search(
                 request_id=mid,
             )
         batch.execute()
+
+    # A partial batch must never look like a complete answer. Before this check,
+    # per-message failures were dropped on the floor and the caller received a
+    # short list with no way to tell it was short -- observed 2026-09-08, when a
+    # 45-ID INBOX query returned 27 summaries and the shortfall was invisible.
+    missing = [mid for mid in message_ids if mid not in fetched]
+    if missing:
+        sample = ", ".join(f"{mid} ({failed.get(mid, 'no callback')})" for mid in missing[:3])
+        raise RuntimeError(
+            f"Gmail batch metadata incomplete: {len(fetched)} of {len(message_ids)} "
+            f"messages returned; {len(missing)} missing. First failures: {sample}"
+        )
 
     return [_summary(fetched[mid], lbls) for mid in message_ids if mid in fetched]
 
