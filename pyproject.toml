@@ -9,7 +9,7 @@ description = "FastMCP server exposing Google Workspace (Gmail, Calendar, Drive,
 requires-python = ">=3.11"
 dependencies = [
     "fastmcp>=4.0.3",
-    "google-auth>=2.57.1",
+    "google-auth>=2.58.0",
     "google-auth-oauthlib>=1.4.1",
     "google-api-python-client>=2.200.0",
     "keyring>=25.7.0",
