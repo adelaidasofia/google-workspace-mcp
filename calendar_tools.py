@@ -188,6 +188,22 @@ def _summarize_event(event: dict, verbose: bool = False) -> dict:
     return out
 
 
+def _attendee_entries(
+    attendees: list[str] | None, optional_attendees: list[str] | None
+) -> list[dict]:
+    """The attendees list for a new event.
+
+    Calendar's EventAttendee.optional defaults to false, so a bare
+    {"email": ...} is a required guest and an optional one carries
+    "optional": True. An address in both lists is sent once, as optional:
+    listing everyone in attendees and then naming who is optional is a natural
+    reading of the two parameters, and it must not invite anyone twice.
+    """
+    optional = {e.lower(): e for e in optional_attendees or []}
+    required = [{"email": a} for a in attendees or [] if a.lower() not in optional]
+    return required + [{"email": e, "optional": True} for e in optional.values()]
+
+
 # ---------------------------------------------------------------------------
 # Tool implementations
 # ---------------------------------------------------------------------------
@@ -258,6 +274,7 @@ def create_event(
     time_zone: str | None = None,
     send_updates: str = "all",
     add_meet: bool = False,
+    optional_attendees: list[str] | None = None,
 ) -> dict:
     svc = service("calendar", "v3", account=account)
     # One zone for both halves: the offset written into dateTime has to agree
@@ -274,8 +291,8 @@ def create_event(
         body["description"] = description
     if location:
         body["location"] = location
-    if attendees:
-        body["attendees"] = [{"email": a} for a in attendees]
+    if attendees or optional_attendees:
+        body["attendees"] = _attendee_entries(attendees, optional_attendees)
     if add_meet:
         body["conferenceData"] = {
             "createRequest": {
@@ -305,6 +322,7 @@ def update_event(
     attendees_remove: list[str] | None = None,
     time_zone: str | None = None,
     send_updates: str = "all",
+    attendees_add_optional: list[str] | None = None,
 ) -> dict:
     svc = service("calendar", "v3", account=account)
     event = svc.events().get(calendarId=calendar_id, eventId=event_id).execute()
@@ -325,10 +343,15 @@ def update_event(
     if attendees_add:
         for email in attendees_add:
             current.setdefault(email.lower(), {"email": email})
+    if attendees_add_optional:
+        # A guest already on the event keeps their entry, RSVP included; only
+        # the flag changes.
+        for email in attendees_add_optional:
+            current.setdefault(email.lower(), {"email": email})["optional"] = True
     if attendees_remove:
         for email in attendees_remove:
             current.pop(email.lower(), None)
-    if attendees_add or attendees_remove:
+    if attendees_add or attendees_add_optional or attendees_remove:
         event["attendees"] = list(current.values())
 
     updated = (

@@ -300,6 +300,7 @@ def cal_create_event(
     description: str | None = None,
     location: str | None = None,
     attendees: list[str] | None = None,
+    optional_attendees: list[str] | None = None,
     time_zone: str | None = None,
     send_updates: str = "all",
     add_meet: bool = False,
@@ -311,6 +312,10 @@ def cal_create_event(
             UTC offset ('2026-08-18T09:00:00') they mean that wall-clock time
             in time_zone, which is almost always what a person means. Include
             an offset ('...T09:00:00-04:00') to pin an exact instant.
+        attendees: Guest emails, invited as required guests.
+        optional_attendees: Guest emails invited as optional guests. Works on
+            its own or alongside attendees; an address in both lists is
+            invited once, as optional.
         time_zone: IANA name, e.g. 'America/Caracas'. Defaults to the machine's
             own zone (override with the GWS_TIME_ZONE environment variable).
         send_updates: 'all' | 'externalOnly' | 'none'.
@@ -319,8 +324,8 @@ def cal_create_event(
     return calendar_tools.create_event(
         summary=summary, start=start, end=end, account=account,
         calendar_id=calendar_id, description=description, location=location,
-        attendees=attendees, time_zone=time_zone, send_updates=send_updates,
-        add_meet=add_meet,
+        attendees=attendees, optional_attendees=optional_attendees,
+        time_zone=time_zone, send_updates=send_updates, add_meet=add_meet,
     )
 
 
@@ -335,6 +340,7 @@ def cal_update_event(
     description: str | None = None,
     location: str | None = None,
     attendees_add: list[str] | None = None,
+    attendees_add_optional: list[str] | None = None,
     attendees_remove: list[str] | None = None,
     time_zone: str | None = None,
     send_updates: str = "all",
@@ -343,11 +349,20 @@ def cal_update_event(
 
     start/end follow the same rule as cal_create_event: no UTC offset means
     that wall-clock time in time_zone, which defaults to the machine's own zone.
+
+    Args:
+        attendees_add: Emails to invite as required guests. A guest already on
+            the event is left as they are, optional or not.
+        attendees_add_optional: Emails to invite as optional guests. A guest
+            already on the event is switched to optional and keeps their RSVP.
+        attendees_remove: Emails to take off the event. Applied after both add
+            lists.
     """
     return calendar_tools.update_event(
         event_id=event_id, account=account, calendar_id=calendar_id,
         summary=summary, start=start, end=end, description=description,
         location=location, attendees_add=attendees_add,
+        attendees_add_optional=attendees_add_optional,
         attendees_remove=attendees_remove, time_zone=time_zone,
         send_updates=send_updates,
     )
