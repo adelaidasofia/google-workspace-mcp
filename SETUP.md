@@ -28,33 +28,34 @@ Open each link, confirm the right project is selected, click **Enable**:
 - Google Docs API: https://console.cloud.google.com/apis/library/docs.googleapis.com
 - Google Sheets API: https://console.cloud.google.com/apis/library/sheets.googleapis.com
 
-## 3. OAuth consent screen
+## 3. Google Auth Platform (the consent screen)
 
-https://console.cloud.google.com/apis/credentials/consent
+https://console.cloud.google.com/auth/overview
 
-1. User type: **External**. (Internal only works with paid Workspace orgs.)
-2. App name: `Google Workspace MCP`. User support email: your email. Developer email: same.
-3. **Scopes** — click **Add or Remove Scopes**, add:
-   - `.../auth/gmail.modify`
-   - `.../auth/gmail.send`
-   - `.../auth/gmail.settings.basic`
-   - `.../auth/calendar`
-   - `.../auth/drive`
-   - `.../auth/documents`
-   - `.../auth/spreadsheets`
-   - `.../auth/userinfo.email`
-   - `openid`
-4. **Test users** — add every email you plan to OAuth:
-   - you@yourcompany.com
-   - you@gmail.com
-   - (any other real mailboxes you want to authorize)
-5. Publishing status: **Testing** is fine for a small, fixed group you'll list as test users — but note refresh tokens for external users expire **7 days** after issuance in Testing mode (you'll re-run `gws_account_add` weekly). If that's not what you want, **Publish app** (Audience → Publish app) instead: no test-user list, no 7-day expiry, works for any Google account, reversible via "Back to testing". Verification is only required to remove the "unverified" warning or exceed ~100 total unverified-app users — not to get non-expiring tokens.
+Google moved the consent screen into **Google Auth Platform**, which has separate **Branding**, **Audience**, **Data Access** and **Clients** pages.
+
+1. **Get started** (shown the first time only): App name `Google Workspace MCP`, user support email = yours, Audience **External** (Internal only works for paid Workspace orgs), contact email = yours, agree to the policy, **Create**.
+2. **Audience** → **Publish app** and confirm, so the publishing status reads **In production**. In **Testing**, Google expires refresh tokens for external users 7 days after they are issued, which means re-running `gws_account_add` every week. Publishing needs no verification: any Google account can authorize after a one-time "Google hasn't verified this app" click-through. Verification only removes that warning and the cap of about 100 total users on unverified apps. Reversible with **Back to testing**.
+   - Want a fixed allowlist instead? Stay in Testing and add every email you plan to authorize under **Audience → Test users**. Anyone not listed gets "Access blocked", and tokens still expire weekly.
+3. **Data Access** → **Add or remove scopes**. In the box for adding scopes manually, paste these nine lines (the full URLs, not the shortened `.../auth/...` form the picker displays), then **Add to table**, **Update** and **Save**:
+
+   ```text
+   https://www.googleapis.com/auth/gmail.modify
+   https://www.googleapis.com/auth/gmail.send
+   https://www.googleapis.com/auth/gmail.settings.basic
+   https://www.googleapis.com/auth/calendar
+   https://www.googleapis.com/auth/drive
+   https://www.googleapis.com/auth/documents
+   https://www.googleapis.com/auth/spreadsheets
+   https://www.googleapis.com/auth/userinfo.email
+   openid
+   ```
 
 ## 4. Create an OAuth client ID
 
-https://console.cloud.google.com/apis/credentials
+https://console.cloud.google.com/auth/clients
 
-1. Click **Create Credentials → OAuth client ID**.
+1. Click **Create client**.
 2. Application type: **Desktop app**.
 3. Name: `google-workspace-mcp-desktop`.
 4. Click **Create**. A dialog shows the client ID + secret — copy **both** now, Google no longer offers a JSON download or a way to view the secret again later (if you lose it, click **Add secret** on the client's detail page to mint a new one).
@@ -276,7 +277,7 @@ Done — go to [§7](#7-set-a-default-account-optional) and [§8](#8-verify) abo
 One person creates the app once, then everyone else uses shared-client mode above:
 
 1. Do §1–§4 above (create project, enable APIs, consent screen, Desktop client).
-2. For a small, fixed group, **Testing** mode works: in §3 step 4 (**Test users**), add every member's email (up to 100). Members who are not listed get "Access blocked".
+2. For a small, fixed group, **Testing** mode works: in §3 step 2 (**Audience → Test users**), add every member's email (up to 100). Members who are not listed get "Access blocked".
 3. For an open or growing group (a public repo, a cohort with late signups, strangers you don't want to track by email), skip the test-user list — **publish the app** instead (Google Auth Platform → Audience → **Publish app**). Any Google account can then authorize with no roster to maintain and no 100-user cap on who's authorized (Google does cap unverified apps around 100 *total* grantees — verify if you expect to exceed that). The one-time "Google hasn't verified this app" click-through is unchanged either way.
 4. Distribute the credential file (see §4/§5 — Google removed client-secret download; you may need to reconstruct the JSON) to members over a private channel, and send the **Client ID** alongside it — corporate members forward that Client ID to their IT to mark *Trusted*. IT-Trust matters independent of Testing vs. production: it's what gets your app past a locked-down org's third-party-app policy, not what removes the unverified warning.
 
@@ -284,7 +285,7 @@ One person creates the app once, then everyone else uses shared-client mode abov
 
 **"No refresh token for X"** — you authorized the account but Google didn't return a refresh token. Go to https://myaccount.google.com/permissions, revoke "Google Workspace MCP", then re-run `gws_account_add`. The `prompt=consent` flag forces a fresh token on re-auth.
 
-**"Access blocked: google-workspace-mcp has not completed verification"** — the email you're signing in with is not on the test-users list in step 3.4. Add it and retry.
+**"Access blocked: google-workspace-mcp has not completed verification"** — the email you're signing in with is not on the test-users list (§3 step 2). Add it and retry, or publish the app.
 
 **"Invalid scope" on OAuth** — the scopes listed in step 3.3 don't match what `accounts.py` requests. Re-check the consent screen scopes.
 
