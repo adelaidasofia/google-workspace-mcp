@@ -157,10 +157,25 @@ if [ -z "$PY" ]; then
 fi
 ok "python3 $PY_VER  ($PY)"
 
-command -v claude >/dev/null 2>&1 || die \
+# The Claude Code CLI might not be on PATH: running this from inside the
+# Claude desktop app's own Code tab, `claude` is often missing there, but the
+# app exports CLAUDE_CODE_EXECPATH pointing at the copy of Claude Code it
+# runs itself, so fall back to that -- but only once it proves it really is
+# Claude Code, never on the strength of the env var's name alone.
+CLAUDE_BIN=""
+if command -v claude >/dev/null 2>&1; then
+  CLAUDE_BIN="claude"
+  ok "claude"
+elif [ -n "${CLAUDE_CODE_EXECPATH:-}" ] && [ -f "$CLAUDE_CODE_EXECPATH" ] \
+     && [ -x "$CLAUDE_CODE_EXECPATH" ] \
+     && "$CLAUDE_CODE_EXECPATH" --version </dev/null 2>&1 | grep -q "Claude Code"; then
+  CLAUDE_BIN="$CLAUDE_CODE_EXECPATH"
+  ok "using the copy of Claude Code that the Claude desktop app runs"
+else
+  die \
 "Claude Code is not installed, or its 'claude' command is not on your PATH.
    Install Claude Code first, quit and reopen Terminal, then run this again."
-ok "claude"
+fi
 
 [ -f "$SCRIPT_DIR/server.py" ] || die \
 "This script is not sitting next to server.py, so the clone looks incomplete.
@@ -281,9 +296,9 @@ step "Connecting it to Claude Code"
 # Re-running should heal a bad value rather than fail on "already exists". The
 # remove is unconditional and its failure ignored, so this does not depend on
 # parsing `claude mcp list` output, which is a display format, not a contract.
-claude mcp remove "$SERVER_NAME" -s user >/dev/null 2>&1 || true
+"$CLAUDE_BIN" mcp remove "$SERVER_NAME" -s user >/dev/null 2>&1 || true
 
-claude mcp add "$SERVER_NAME" -s user \
+"$CLAUDE_BIN" mcp add "$SERVER_NAME" -s user \
   -e "GWS_CLIENT_ID=$CLIENT_ID" \
   -e "GWS_CLIENT_SECRET=$CLIENT_SECRET" \
   -- "$VENV_PY" "$SCRIPT_DIR/server.py" >/dev/null || die \
