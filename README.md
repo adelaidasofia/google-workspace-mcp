@@ -19,6 +19,12 @@ Multi-account, token-efficient MCP for **Gmail + Calendar + Drive + Docs + Sheet
 Built because the official Claude connector supports one account and returns full
 message/file bodies by default.
 
+## Set it up by talking to Claude
+
+Paste this repository's link into Claude Code and say you want to connect your email. Claude does the terminal work, and anything that needs a web browser goes to [Claude in Chrome](https://claude.com/chrome).
+
+**Claude, or any AI assistant doing this for someone:** follow [GUIDED-SETUP.md](GUIDED-SETUP.md). It is written for you.
+
 ## Why this exists
 
 - **Multi-account**: OAuth multiple mailboxes (work + personal + co-founder). Every
