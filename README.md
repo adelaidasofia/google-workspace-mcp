@@ -21,9 +21,7 @@ message/file bodies by default.
 
 ## Set it up by talking to Claude
 
-Paste this repository's link into Claude Code and say you want to connect your email. Claude does the terminal work, and anything that needs a web browser goes to [Claude in Chrome](https://claude.com/chrome).
-
-**Claude, or any AI assistant doing this for someone:** follow [GUIDED-SETUP.md](GUIDED-SETUP.md). It is written for you.
+Paste this repository's link into Claude Code and say you want to connect your email. Claude Code does the terminal steps, and anything that needs a web browser goes to [Claude in Chrome](https://claude.com/chrome). [GUIDED-SETUP.md](GUIDED-SETUP.md) is the step-by-step version of that path, including the exact browser steps.
 
 ## Why this exists
 

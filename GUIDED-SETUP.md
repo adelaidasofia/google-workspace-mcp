@@ -1,20 +1,17 @@
-# Guided setup: connecting someone's Google account through Claude
+# Guided setup with Claude Code and Claude in Chrome
 
-**Who this is for.** An AI assistant (Claude Code, or any agent that can run a terminal) that was handed this repository's link by a person who wants their Gmail, Calendar and Drive connected. Assume the person is not technical and may not read English. If you are a person setting this up by hand, [SETUP.md](SETUP.md) is the full manual.
+This is the setup path for someone who wants Claude to connect their Gmail, Calendar and Drive for them. Claude Code runs the terminal steps. Claude in Chrome (the Claude extension for Google Chrome, [claude.com/chrome](https://claude.com/chrome)) does the browser steps. The person does three things: pastes the browser messages into Claude in Chrome, types their own password when a page asks for it, and restarts Claude when told. [SETUP.md](SETUP.md) is the full manual for doing it by hand.
 
-The person's side of this is three things: paste messages you give them into Claude in Chrome, type their own password when a page asks for it, and restart Claude when you tell them to. Everything else is yours.
+## How the session goes
 
-## How to run it
+- In the person's language: short sentences, no jargon, one step at a time.
+- Claude Code runs every terminal step. The person never types a command, edits a file or opens Terminal. When a command needs their approval, one plain sentence says what it does.
+- Each browser task is one message for the person to paste into Claude in Chrome, introduced with "Copy this and paste it into Claude in Chrome:" and followed by one line saying what to bring back.
+- Passwords and 2-step codes are always typed by the person and never shared. Every browser message says to stop at a password or code field and let the person type it.
+- The person keeps the Claude Code window open until setup is finished. Closing it halfway loses the progress.
+- The Google app is the person's own, in their own Google Cloud project. SETUP.md's shared-client mode is only for someone who was handed a client by their team.
 
-- **Talk in the person's language.** Reply in the language they wrote in. Short sentences, no jargon, one step at a time.
-- **You do everything in the terminal.** Never ask the person to type a command, edit a file, or open Terminal. When a command needs their approval, say in one plain sentence what it does.
-- **Anything in a web browser goes to Claude in Chrome** (the Claude extension for Google Chrome, [claude.com/chrome](https://claude.com/chrome)). Give the person ONE message to paste there, introduced with the line "Copy this and paste it into Claude in Chrome:" in their language, followed by one line saying what to bring back to you.
-- **Passwords and 2-step codes are theirs.** Never ask for them. Every message you write for Claude in Chrome must say: if a page asks for my password or a code, stop and let me type it.
-- **Tell them early:** keep this window open until I say we are done. The setup is lost if they close the session halfway.
-- **Use their own Google app.** It is the default. Do not ask whether someone gave them a shared client, a client secret, or a `client_secret.json`. Only use a shared client if the person hands you one without being asked; then follow SETUP.md's shared-client mode.
-- **Stay on this connector.** The person chose this repository; do not steer them to a different Google connector.
-
-## Why this is safe (so you can reassure, not alarm)
+## Security model
 
 - The Google app is theirs, inside their own Google account. No one else can use it.
 - Tokens stay on their computer, in the operating system's credential store. No third-party server is involved.
@@ -24,7 +21,7 @@ The person's side of this is three things: paste messages you give them into Cla
 
 ## Steps
 
-### 1. Get the code (you)
+### 1. Get the code (Claude Code)
 
 ```bash
 cd ~ && if [ -d google-workspace-mcp/.git ]; then git -C google-workspace-mcp pull --ff-only; else git clone https://github.com/adelaidasofia/google-workspace-mcp.git; fi
@@ -34,7 +31,7 @@ On Windows, see [Windows](#windows) below.
 
 ### 2. Create their Google app (Claude in Chrome)
 
-Give them this message, translated into their language. Keep the nine scope lines exactly as written.
+The person gets this message, translated into their language, with the nine scope lines kept exactly as written:
 
 ```text
 Help me create my own Google app so a program on my computer can use my Gmail, Calendar, Drive, Docs and Sheets. Do all the clicking for me in Google Cloud Console (console.cloud.google.com), signed in as me. Ask me before you accept any terms. If a page asks for my password or a code from my phone, stop and let me type it.
@@ -57,11 +54,11 @@ openid
 7. A window shows my Client ID and Client secret. Do not close it. Show me both values so I can copy them. If you cannot show the secret, tell me it is on the screen so I copy it myself.
 ```
 
-Then tell them: when Claude in Chrome finishes, paste the Client ID and the Client secret here.
+When Claude in Chrome finishes, the person pastes the Client ID and the Client secret back into Claude Code.
 
-**If creating the project is blocked** (common on work accounts): have them run the same message signed in to a personal Gmail. The account that owns the app and the mailbox they connect do not have to be the same.
+**If creating the project is blocked** (common on work accounts): the same message works signed in to a personal Gmail. The account that owns the app and the mailbox they connect do not have to be the same.
 
-### 3. Install (you)
+### 3. Install (Claude Code)
 
 ```bash
 GWS_CLIENT_ID='<client id>' GWS_CLIENT_SECRET='<client secret>' bash ~/google-workspace-mcp/install.sh
@@ -69,7 +66,7 @@ GWS_CLIENT_ID='<client id>' GWS_CLIENT_SECRET='<client secret>' bash ~/google-wo
 
 With both values set the installer asks no questions: it builds its own environment, installs dependencies and registers the connector with Claude Code. The Client ID ends in `.apps.googleusercontent.com`; the secret usually starts with `GOCSPX-`.
 
-If it stops with "Claude Code is not installed" while you are running inside the Claude desktop app, put the app's own copy of Claude Code on `PATH` and run it again:
+If it stops with "Claude Code is not installed" when Claude Code is running inside the Claude desktop app, the fix is to put the app's own copy of Claude Code on `PATH` and run it again:
 
 ```bash
 PATH="$(dirname "$CLAUDE_CODE_EXECPATH"):$PATH" GWS_CLIENT_ID='<client id>' GWS_CLIENT_SECRET='<client secret>' bash ~/google-workspace-mcp/install.sh
@@ -77,7 +74,7 @@ PATH="$(dirname "$CLAUDE_CODE_EXECPATH"):$PATH" GWS_CLIENT_ID='<client id>' GWS_
 
 ### 4. Restart and connect their account (the person, helped by Claude in Chrome)
 
-A running Claude only loads new connectors when it starts. Before they restart, tell them all of this, because the next session will not have this context:
+A running Claude only loads new connectors when it starts. The next session will not have this context, so the person hears all of this before restarting:
 
 1. Quit Claude completely (Cmd + Q on a Mac) and open it again.
 2. Send: "Connect my Google account and show me my last 5 emails." (in their language)
@@ -89,7 +86,7 @@ Claude in Chrome then clicks Advanced, continues to the app, ticks every permiss
 
 | What they see | What to do |
 |---|---|
-| "Access blocked" on a work account | The company must trust the app. Give them the IT message below with their Client ID filled in, and connect a personal Gmail in the meantime. |
+| "Access blocked" on a work account | The company must trust the app. The IT message below, with their Client ID filled in, asks for that. A personal Gmail can be connected in the meantime. |
 | "Error 400: invalid_scope" | One of the nine lines in step 2.5 is missing. Send Claude in Chrome back to Data Access to add it. |
 | "Error 400: redirect_uri_mismatch" | The client is not a "Desktop app". Create a Desktop app client and install again with its values. |
 | Worked, then stopped about a week later | The app is still in Testing. Publish it (step 2.4), then run `gws_account_add` again. |
