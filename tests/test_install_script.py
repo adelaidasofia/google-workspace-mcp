@@ -71,7 +71,10 @@ def box(tmp_path):
 
 def _run(box, **creds):
     env = dict(os.environ, PATH=f"{box['bin']}{os.pathsep}{os.environ['PATH']}", NO_COLOR="1")
-    for key in ("GWS_CLIENT_ID", "GWS_CLIENT_SECRET"):
+    # Popped so the host's own values -- this suite may itself be running
+    # inside a Claude Code session with CLAUDE_CODE_EXECPATH exported -- can
+    # never leak into a test that means to control it explicitly.
+    for key in ("GWS_CLIENT_ID", "GWS_CLIENT_SECRET", "CLAUDE_CODE_EXECPATH"):
         env.pop(key, None)
     env.update(creds)
     proc = subprocess.run(
@@ -287,3 +290,160 @@ def test_a_broken_override_fails_instead_of_searching_past_it(sealed):
     assert proc.returncode != 0
     assert "mcp add" not in calls
     assert "GWS_PYTHON" in proc.stderr, proc.stderr
+
+
+# ---------------------------------------------------------------------------
+# Claude Code resolution: PATH, or the desktop app's CLAUDE_CODE_EXECPATH
+#
+# Running this script from inside the Claude desktop app's own Code tab,
+# `claude` is often not on PATH -- the app never adds it -- but the app
+# exports CLAUDE_CODE_EXECPATH pointing at the copy of Claude Code it runs
+# itself, typically somewhere under "Application Support", spaces included.
+# install.sh falls back to that, but only after PATH comes up empty, and only
+# once the binary proves it really is Claude Code.
+#
+# These need the same fully-sealed PATH as the interpreter-discovery tests
+# above, for the same reason: this machine has a real `claude` on PATH, and
+# prepending a fixture bindir to the *real* PATH (as `box` / `_run` do) can't
+# hide it -- only a PATH built from scratch can guarantee `command -v claude`
+# finds nothing.
+# ---------------------------------------------------------------------------
+
+EXECPATH_TOOLS = BASE_TOOLS + ("grep",)
+
+
+@pytest.fixture
+def bare_box(tmp_path):
+    """A sealed environment like `sealed`, but with no `claude` anywhere on
+    PATH -- not even a real one the host happens to have.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    shutil.copy(INSTALL_SH, repo / "install.sh")
+    (repo / "server.py").write_text("# stub\n")
+    (repo / "requirements.txt").write_text("")
+    venv_bin = repo / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    _exe(venv_bin / "python", "#!/bin/sh\nexit 0\n")
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for tool in EXECPATH_TOOLS:
+        real = shutil.which(tool)
+        if real is None:
+            pytest.skip(f"{tool} unavailable, cannot seal PATH")
+        (bindir / tool).symlink_to(real)
+    _exe(bindir / "git", "#!/bin/sh\nexit 0\n")
+    # A qualifying interpreter, so the run reaches the claude check at all --
+    # interpreter discovery is not what these tests are about.
+    _py_shim(bindir / "python3", "3.12")
+
+    log = tmp_path / "calls.log"
+    log.touch()
+
+    return {"repo": repo, "bin": bindir, "log": log}
+
+
+def _run_bare(bare_box, **extra):
+    env = {"PATH": str(bare_box["bin"]), "NO_COLOR": "1", "HOME": str(bare_box["repo"])}
+    env.update({"GWS_CLIENT_ID": ID, "GWS_CLIENT_SECRET": SECRET})
+    env.update(extra)
+    proc = subprocess.run(
+        [BASH, str(bare_box["repo"] / "install.sh")],
+        capture_output=True, text=True, env=env, input="", timeout=120,
+    )
+    return proc, bare_box["log"].read_text()
+
+
+def _recording_claude(path: Path, log: Path, version_line: str) -> None:
+    """A shim that answers --version on its own, and otherwise behaves like
+    the `claude` shim in `box` / `sealed`: records its argv, and heals on
+    `mcp remove` of something not yet registered by exiting 1.
+    """
+    _exe(
+        path,
+        f"""#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "{version_line}"
+  exit 0
+fi
+echo "$*" >> "{log}"
+case "$2" in remove) exit 1 ;; esac
+exit 0
+""",
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_execpath_is_used_when_claude_is_not_on_path(bare_box, tmp_path):
+    """The reported case: inside the Claude desktop app's Code tab, `claude`
+    is not on PATH, but CLAUDE_CODE_EXECPATH points at the app's own copy,
+    which lives somewhere with a space in the path (e.g. under "Application
+    Support") that is not on PATH either."""
+    execdir = (
+        tmp_path
+        / "Application Support"
+        / "Claude"
+        / "claude-code"
+        / "2.1.281"
+        / "claude.app"
+        / "Contents"
+        / "MacOS"
+    )
+    execdir.mkdir(parents=True)
+    execpath = execdir / "claude"
+    _recording_claude(execpath, bare_box["log"], "2.1.281 (Claude Code)")
+
+    proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    add = [ln for ln in calls.splitlines() if ln.startswith("mcp add")]
+    assert len(add) == 1, f"expected one `mcp add`, got {calls!r}"
+    argv = add[0]
+    assert "mcp add google-workspace -s user" in argv
+    assert f"-e GWS_CLIENT_ID={ID}" in argv
+    assert f"-e GWS_CLIENT_SECRET={SECRET}" in argv
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_neither_path_nor_execpath_fails_with_the_not_installed_message(bare_box):
+    """Negative control: nothing at all resolves to Claude Code."""
+    proc, calls = _run_bare(bare_box)
+
+    assert proc.returncode != 0
+    assert "mcp add" not in calls
+    assert "Claude Code is not installed" in proc.stderr, proc.stderr
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_an_execpath_that_is_not_claude_code_is_rejected(bare_box, tmp_path):
+    """CLAUDE_CODE_EXECPATH is trusted only after it proves itself: an
+    arbitrary executable that happens to be sitting at that path, and answers
+    --version with something else, must not be used."""
+    other = tmp_path / "not-claude"
+    _recording_claude(other, bare_box["log"], "some-other-tool 9.9.9")
+
+    proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(other))
+
+    assert proc.returncode != 0
+    assert "mcp add" not in calls
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_path_wins_over_execpath(sealed, tmp_path):
+    """`claude` on PATH is still the first answer; CLAUDE_CODE_EXECPATH is
+    only a fallback for when PATH has nothing."""
+    _py_shim(sealed["bin"] / "python3", "3.12")
+
+    execpath_log = tmp_path / "execpath-calls.log"
+    execpath_log.touch()
+    execpath_dir = tmp_path / "unused-execpath"
+    execpath_dir.mkdir()
+    execpath = execpath_dir / "claude"
+    _recording_claude(execpath, execpath_log, "2.1.281 (Claude Code)")
+
+    proc, calls = _run_sealed(sealed, CLAUDE_CODE_EXECPATH=str(execpath))
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "mcp add google-workspace" in calls
+    assert execpath_log.read_text() == "", "the execpath shim must not have been invoked"
