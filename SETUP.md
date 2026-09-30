@@ -34,7 +34,7 @@ https://console.cloud.google.com/auth/overview
 
 Google moved the consent screen into **Google Auth Platform**, which has separate **Branding**, **Audience**, **Data Access** and **Clients** pages.
 
-1. **Get started** (shown the first time only): App name `Google Workspace MCP`, user support email = yours, Audience **External** (Internal only works for paid Workspace orgs), contact email = yours, agree to the policy, **Create**.
+1. **Get started** (shown the first time only): App name `Google Workspace MCP`, user support email = yours, Audience **External** (Internal needs a Google Workspace or Cloud Identity organization), contact email = yours, agree to the policy, **Create**.
 2. **Audience** → **Publish app** and confirm, so the publishing status reads **In production**. In **Testing**, Google expires refresh tokens for external users 7 days after they are issued, which means re-running `gws_account_add` every week. Publishing needs no verification: any Google account can authorize after a one-time "Google hasn't verified this app" click-through. Verification only removes that warning and the cap of about 100 total users on unverified apps. Reversible with **Back to testing**.
    - Want a fixed allowlist instead? Stay in Testing and add every email you plan to authorize under **Audience → Test users**. Anyone not listed gets "Access blocked", and tokens still expire weekly.
 3. **Data Access** → **Add or remove scopes**. In the box for adding scopes manually, paste these nine lines (the full URLs, not the shortened `.../auth/...` form the picker displays), then **Add to table**, **Update** and **Save**:
@@ -287,7 +287,7 @@ One person creates the app once, then everyone else uses shared-client mode abov
 
 **"Access blocked: google-workspace-mcp has not completed verification"** — the email you're signing in with is not on the test-users list (§3 step 2). Add it and retry, or publish the app.
 
-**"Invalid scope" on OAuth** — the scopes listed in step 3.3 don't match what `accounts.py` requests. Re-check the consent screen scopes.
+**"Invalid scope" on OAuth** — the scopes listed in §3 step 3 don't match what `accounts.py` requests. Re-check the consent screen scopes.
 
 **Keychain password prompts every tool call** — macOS anchors an "Always Allow" grant to a stable code signature. On an ad-hoc-signed Python (e.g. a `uv`-managed interpreter — `codesign -dv` shows `Signature=adhoc`, no Team ID) the grant can't persist, so keychain reads re-prompt. Credential caching already cuts this to at most one prompt per account per server start (instead of one per call).
 
