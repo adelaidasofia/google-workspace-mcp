@@ -67,12 +67,17 @@ def _exe(path: Path, body: str) -> None:
 
 
 def _throwaway_config(root: Path) -> dict:
-    """HOME and CLAUDE_CONFIG_DIR for one installer run, both inside `root`."""
+    """HOME, CLAUDE_CONFIG_DIR and TMPDIR for one installer run, all inside `root`.
+
+    TMPDIR is not about Claude Code: it keeps the installer's own scratch files
+    inside the test's tmp dir too, where a test can see whether they are cleaned up.
+    """
     home = root / "home"
     config = root / "claude-config"
-    home.mkdir(exist_ok=True)
-    config.mkdir(exist_ok=True)
-    return {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(config)}
+    tmp = root / "tmp"
+    for d in (home, config, tmp):
+        d.mkdir(exist_ok=True)
+    return {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(config), "TMPDIR": str(tmp)}
 
 
 def _command_found_on(env: dict, name: str) -> str:
@@ -206,7 +211,11 @@ def test_rerunning_heals_instead_of_failing(box):
 # installed on the machine running it.
 # ---------------------------------------------------------------------------
 
-BASE_TOOLS = ("sed", "cat", "rm", "dirname")
+# mktemp, cat and rm are what the version probe uses for its scratch file. They
+# are here, and not only in the tests that run the probe, so that a regression
+# which probes when it should not still reaches the stand-in it would run,
+# instead of failing on a missing tool and leaving the test green.
+BASE_TOOLS = ("sed", "cat", "rm", "dirname", "mktemp")
 
 
 def _py_shim(path: Path, version: str) -> None:
@@ -473,11 +482,47 @@ HANG_SECONDS = 60
 def _hanging_claude(path: Path) -> None:
     """A binary that never answers --version (it sleeps for HANG_SECONDS).
 
-    `exec`, so the process the installer's ten-second alarm kills is the sleeper
-    itself, not a shell that leaves a sleeping child holding the output pipe.
+    `exec`, so the binary is the sleeper itself. A wrapper that starts a child
+    and leaves it holding the output open is a different case, with its own
+    stand-in below.
     """
     sleeper = shutil.which("sleep")
     _exe(path, f'#!/bin/sh\nexec "{sleeper}" {HANG_SECONDS}\n')
+
+
+def _claude_with_a_lingering_child(path: Path, log: Path, *, answers: bool) -> None:
+    """A binary that starts a long-lived child when it is asked for its version.
+
+    The child inherits the binary's stdout and stderr and keeps them open for
+    HANG_SECONDS, as a wrapper script or a helper process that outlives its
+    parent does. With `answers` the binary prints its banner and exits at once:
+    it has said what it is, and only its child is slow. Without, it waits for the
+    child, so it cannot answer inside the installer's ten seconds. Either way the
+    installer must not wait for the child: a shell waits for the process it
+    started, not for everything that inherited the output it was given.
+    """
+    sleeper = shutil.which("sleep")
+    if answers:
+        version = f'  echo "2.1.281 (Claude Code)"\n  "{sleeper}" {HANG_SECONDS} &\n  exit 0\n'
+    else:
+        version = f'  "{sleeper}" {HANG_SECONDS} &\n  wait\n  echo "2.1.281 (Claude Code)"\n  exit 0\n'
+    _exe(
+        path,
+        f"""#!/bin/sh
+echo "$*" >> "{log}"
+if [ "$1" = "--version" ]; then
+{version}fi
+case "$2" in
+  remove) exit 1 ;;
+esac
+exit 0
+""",
+    )
+
+
+def _probe_leftovers(fx) -> list:
+    """Scratch files the version probe left behind in the run's TMPDIR."""
+    return sorted(p.name for p in (fx["root"] / "tmp").glob("claude-probe.*"))
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not found")
@@ -591,6 +636,49 @@ def test_an_execpath_that_hangs_on_version_is_given_up_on(bare_box, tmp_path):
     assert proc.returncode != 0
     assert "mcp add" not in calls
     assert "Claude Code is not installed" in proc.stderr, proc.stderr
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_a_child_that_keeps_the_output_open_does_not_stretch_the_wait(bare_box, tmp_path):
+    """The binary answered and exited; a helper it started still holds the output
+    it was given. The installer waits for the binary it ran, not for everything
+    that inherited the output, so the answer is used at once."""
+    execpath = tmp_path / "claude-leaves-a-child"
+    _claude_with_a_lingering_child(execpath, bare_box["log"], answers=True)
+
+    started = time.monotonic()
+    proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
+    elapsed = time.monotonic() - started
+
+    assert elapsed < HANG_SECONDS - 20, (
+        f"the installer waited for a child of the binary it asked: it took {elapsed:.0f}s, "
+        f"and the child lives for {HANG_SECONDS}s"
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "mcp add google-workspace" in calls
+    assert _probe_leftovers(bare_box) == []
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_a_wrapper_whose_child_outlives_the_bound_is_still_cut_off_on_time(bare_box, tmp_path):
+    """The ten second bound has to hold for a binary that is a wrapper around a
+    child it waits for. The alarm ends the wrapper; whatever the child still has
+    open must not stretch the wait past it."""
+    execpath = tmp_path / "claude-wrapper"
+    _claude_with_a_lingering_child(execpath, bare_box["log"], answers=False)
+
+    started = time.monotonic()
+    proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
+    elapsed = time.monotonic() - started
+
+    assert elapsed < HANG_SECONDS - 20, (
+        f"the --version probe was not bounded: the installer took {elapsed:.0f}s "
+        f"against a wrapper whose child lives for {HANG_SECONDS}s"
+    )
+    assert proc.returncode != 0
+    assert "mcp add" not in calls
+    assert "Claude Code is not installed" in proc.stderr, proc.stderr
+    assert _probe_leftovers(bare_box) == []
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not found")

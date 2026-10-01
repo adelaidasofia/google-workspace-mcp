@@ -157,25 +157,40 @@ if [ -z "$PY" ]; then
 fi
 ok "python3 $PY_VER  ($PY)"
 
+# Run a command for at most ten seconds, with nothing on its stdin, so a binary
+# that hangs, or that waits for input, cannot hang the installer. Stock macOS has
+# no `timeout`, but it does have perl, and perl's alarm survives the exec that
+# follows it. Where there is no perl the command still runs, just unbounded:
+# asked, rather than not asked.
+run_bounded() {
+  if command -v perl >/dev/null 2>&1; then
+    perl -e 'alarm shift; exec @ARGV' 10 "$@" </dev/null
+  else
+    "$@" </dev/null
+  fi
+}
+
 # Is the binary at $1 really Claude Code? Ask it, and trust only what it says.
 #
-# The answer is captured first and matched afterwards, never piped straight into
-# grep. Under `set -o pipefail` a binary that printed its banner and then exited
+# The answer goes to a temporary file, not through a pipe or a $(...): the shell
+# then waits for the process it started and no longer, so a child that process
+# leaves behind holding its output open (a wrapper script, a helper) cannot
+# stretch the ten seconds. It is matched afterwards, never piped straight into
+# grep: under `set -o pipefail` a binary that printed its banner and then exited
 # non-zero would fail the whole pipeline and be thrown out as "not Claude Code",
 # when what it said is the only thing being asked about. Both streams are read:
-# a banner printed only on stderr is still a banner.
-#
-# The asking is bounded to ten seconds: a binary that hangs on --version is cut
-# off there instead of hanging the installer. Stock macOS has no `timeout`, but
-# it does have perl, and perl's alarm survives the exec that follows it. Where
-# there is no perl the question is still asked, just unbounded, rather than not
-# asked.
+# a banner printed only on stderr is still a banner. Where there is no usable
+# mktemp the answer is read through $(...) instead, which is only slower to give
+# up on such a child.
 is_claude_code() { # is_claude_code <binary>
-  local said=""
-  if command -v perl >/dev/null 2>&1; then
-    said="$(perl -e 'alarm shift; exec @ARGV' 10 "$1" --version </dev/null 2>&1 || true)"
+  local out="" said=""
+  out="$(mktemp "${TMPDIR:-/tmp}/claude-probe.XXXXXX" 2>/dev/null)" || out=""
+  if [ -n "$out" ]; then
+    run_bounded "$1" --version >"$out" 2>&1 || true
+    said="$(cat "$out" 2>/dev/null || true)"
+    rm -f "$out"
   else
-    said="$("$1" --version </dev/null 2>&1 || true)"
+    said="$(run_bounded "$1" --version 2>&1 || true)"
   fi
   case "$said" in *"Claude Code"*) return 0 ;; esac
   return 1
