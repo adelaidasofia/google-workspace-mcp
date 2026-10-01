@@ -261,10 +261,10 @@ A browser opens. Sign in with **your** Google account and grant every scope.
 
 **3. Clear the "Google hasn't verified this app" screen**
 
-The shared app runs in Testing mode, so Google shows an "unverified app" warning on first sign-in. This is expected — it is your program's own app, not a third party.
+Google shows an "unverified app" warning on first sign-in because the shared app has not been through Google's verification. This is expected — it is your program's own app, not a third party.
 
 - **Corporate Google account:** the warning disappears once your IT admin marks the app's **Client ID** as *Trusted* — that is the one pre-workshop request IT needs, and the program sends you the exact Client ID to hand them. If IT just approved it, give it ~15 minutes to propagate, then retry.
-- **Personal Gmail:** click **Advanced → Go to _(app name)_ (unsafe)** and continue. "Unverified" here only means the app is in Testing mode; you are authorizing your own account into your program's own app.
+- **Personal Gmail:** click **Advanced → Go to _(app name)_ (unsafe)** and continue. "Unverified" here only means Google has not verified the app; you are authorizing your own account into your program's own app.
 
 Done — go to [§7](#7-set-a-default-account-optional) and [§8](#8-verify) above to set a default and confirm it works. You never needed §1–§6.
 
