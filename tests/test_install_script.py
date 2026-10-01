@@ -20,6 +20,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -156,14 +157,22 @@ def _box_env(box, **creds):
     return env
 
 
-def _run(box, **creds):
-    env = _box_env(box, **creds)
-    _assert_nothing_real_is_reachable(env, box["root"], shim_expected=True)
+def _run_installer(fx, env, *, shim_expected):
+    """The one place install.sh is started: the guard first, then the run.
+
+    Every runner below goes through here, so a run cannot skip the guard by
+    forgetting it; test_every_runner_checks_the_guard_... shows that it cannot.
+    """
+    _assert_nothing_real_is_reachable(env, fx["root"], shim_expected=shim_expected)
     proc = subprocess.run(
-        ["bash", str(box["repo"] / "install.sh")],
+        [BASH or "bash", str(fx["repo"] / "install.sh")],
         capture_output=True, text=True, env=env, input="", timeout=120,
     )
-    return proc, box["log"].read_text()
+    return proc, fx["log"].read_text()
+
+
+def _run(box, **creds):
+    return _run_installer(box, _box_env(box, **creds), shim_expected=True)
 
 
 def test_valid_credentials_register_the_expected_command(box):
@@ -283,13 +292,7 @@ def _sealed_env(fx, **extra):
 
 
 def _run_sealed(sealed, **extra):
-    env = _sealed_env(sealed, **extra)
-    _assert_nothing_real_is_reachable(env, sealed["root"], shim_expected=True)
-    proc = subprocess.run(
-        [BASH, str(sealed["repo"] / "install.sh")],
-        capture_output=True, text=True, env=env, input="", timeout=120,
-    )
-    return proc, sealed["log"].read_text()
+    return _run_installer(sealed, _sealed_env(sealed, **extra), shim_expected=True)
 
 
 def _chosen(proc):
@@ -444,13 +447,7 @@ def bare_box(tmp_path):
 
 
 def _run_bare(bare_box, **extra):
-    env = _sealed_env(bare_box, **extra)
-    _assert_nothing_real_is_reachable(env, bare_box["root"], shim_expected=False)
-    proc = subprocess.run(
-        [BASH, str(bare_box["repo"] / "install.sh")],
-        capture_output=True, text=True, env=env, input="", timeout=120,
-    )
-    return proc, bare_box["log"].read_text()
+    return _run_installer(bare_box, _sealed_env(bare_box, **extra), shim_expected=False)
 
 
 def _recording_claude(
@@ -791,6 +788,33 @@ def test_no_fixture_can_reach_a_real_claude(request, fixture_name, env_of, shim_
     fx = request.getfixturevalue(fixture_name)
 
     _assert_nothing_real_is_reachable(env_of(fx), fx["root"], shim_expected=shim_expected)
+
+
+@pytest.mark.parametrize(
+    "fixture_name, runner",
+    [("box", _run), ("sealed", _run_sealed), ("bare_box", _run_bare)],
+)
+def test_every_runner_checks_the_guard_before_it_starts_the_installer(
+    request, monkeypatch, fixture_name, runner
+):
+    """The guard protects nothing if a run can skip it. With the guard swapped
+    for one that raises, each runner has to raise: take the guard call out of
+    the shared runner, or let one of these start install.sh itself, and the
+    installer runs instead and this fails."""
+
+    class GuardReached(Exception):
+        pass
+
+    def tripwire(env, root, *, shim_expected):
+        raise GuardReached
+
+    monkeypatch.setattr(sys.modules[__name__], "_assert_nothing_real_is_reachable", tripwire)
+    fx = request.getfixturevalue(fixture_name)
+
+    # Credentials are passed so that a run which does get through never stops to
+    # ask for them.
+    with pytest.raises(GuardReached):
+        runner(fx, GWS_CLIENT_ID=ID, GWS_CLIENT_SECRET=SECRET)
 
 
 def test_the_guard_fails_when_a_real_claude_is_reachable(tmp_path):
