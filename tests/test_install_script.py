@@ -678,13 +678,18 @@ def test_an_execpath_that_is_not_claude_code_is_rejected(bare_box, tmp_path):
         ("2.1.281 (Claude Code) is not installed here", "stdout", 0),
         # More than a version in front of the suffix is not a version.
         ("claude-code 2.1.281 (Claude Code)", "stdout", 0),
+        # The banner is looked for on every line, so a line that is not the banner
+        # does not become one because other lines come with it.
+        ("see the docs\nClaude Code is not installed on this machine", "stderr", 127),
+        ("warning: out of date\nclaude-code 2.1.281 (Claude Code)", "stdout", 0),
     ],
 )
 @pytest.mark.skipif(BASH is None, reason="bash not found")
 def test_an_execpath_that_only_mentions_claude_code_is_rejected(bare_box, tmp_path, said, on, code):
-    """What counts is the exact line `claude --version` prints, "<version>
-    (Claude Code)". An executable that merely mentions Claude Code, in an error
-    or in other words, is not it, and must not be registered with `mcp add`."""
+    """What counts is a line that is exactly what `claude --version` prints,
+    "<version> (Claude Code)". An executable that merely mentions Claude Code, in
+    an error or in other words, is not it, and must not be registered with
+    `mcp add`."""
     execpath = tmp_path / "claude-in-name-only"
     _recording_claude(execpath, bare_box["log"], said, version_exit=code, version_on=on)
 
@@ -697,7 +702,7 @@ def test_an_execpath_that_only_mentions_claude_code_is_rejected(bare_box, tmp_pa
 
 @pytest.mark.skipif(BASH is None, reason="bash not found")
 def test_an_execpath_that_says_more_after_its_banner_is_still_used(bare_box, tmp_path):
-    """Only the first line is the banner; what follows it does not matter."""
+    """What follows the banner does not matter."""
     execpath = tmp_path / "claude-says-more"
     _exe(
         execpath,
@@ -715,6 +720,92 @@ exit 0
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "mcp add google-workspace" in calls
+
+
+def _warning(n: int) -> str:
+    return f"warning {n}: could not read the settings file, using the defaults"
+
+
+# Forty lines are about 2.5 KB: a lot more than any real Claude Code prints ahead
+# of its banner, and still inside the part of the answer the installer reads.
+A_PAGE_OF_WARNINGS = "\n".join(_warning(n) for n in range(40))
+
+
+@pytest.mark.parametrize(
+    "first, on",
+    [
+        (_warning(0), "stderr"),
+        (_warning(0), "stdout"),
+        ("", "stdout"),
+        (A_PAGE_OF_WARNINGS, "stderr"),
+    ],
+    ids=["a-warning-on-stderr", "a-warning-on-stdout", "a-blank-line", "a-page-of-warnings-on-stderr"],
+)
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_an_execpath_that_prints_something_before_its_banner_is_still_used(bare_box, tmp_path, first, on):
+    """The banner does not have to be the first line. The installer reads both
+    streams as one answer, so a warning printed ahead of the banner, on either
+    stream, a page of them, or a blank line, must not turn a real Claude Code
+    away."""
+    to_stderr = " >&2" if on == "stderr" else ""
+    execpath = tmp_path / "claude-warns-first"
+    _exe(
+        execpath,
+        f"""#!/bin/sh
+echo "$*" >> "{bare_box["log"]}"
+if [ "$1" = "--version" ]; then
+  echo "{first}"{to_stderr}
+  echo "2.1.281 (Claude Code)"
+  exit 0
+fi
+case "$2" in
+  remove) exit 1 ;;
+esac
+exit 0
+""",
+    )
+
+    proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "mcp add google-workspace" in calls
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_an_execpath_that_buries_its_banner_under_pages_of_output_is_refused_promptly(bare_box, tmp_path):
+    """Only the start of the answer is looked at. A real Claude Code prints one
+    line, and bash takes far longer than anything the installer is worth waiting
+    for to go through thousands of lines one at a time: the time grows much faster
+    than the length. A banner after that much output is not looked for, so the
+    copy is refused, and quickly.
+
+    The elapsed time is what tells an installer that reads it all from one that
+    does not, so the bound is the point of the test and the refusal only follows
+    from it."""
+    noise = tmp_path / "pages-of-output.txt"
+    noise.write_text("".join(_warning(n) + "\n" for n in range(6000)))
+    execpath = tmp_path / "claude-buries-its-banner"
+    _exe(
+        execpath,
+        f"""#!/bin/sh
+echo "$*" >> "{bare_box["log"]}"
+if [ "$1" = "--version" ]; then
+  cat "{noise}"
+  echo "2.1.281 (Claude Code)"
+  exit 0
+fi
+exit 0
+""",
+    )
+
+    started = time.monotonic()
+    proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 20, f"the installer went through the whole answer: it took {elapsed:.0f}s"
+    assert proc.returncode != 0
+    assert "mcp add" not in calls
+    _assert_the_app_copy_was_refused(proc, execpath)
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not found")

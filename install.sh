@@ -183,11 +183,13 @@ run_bounded() {
 # mktemp the answer is read through $(...) instead, which is only slower to give
 # up on such a child.
 #
-# What counts is the first line, and only if it is exactly what `claude
-# --version` prints: "<version> (Claude Code)". A different tool, or an error
-# that merely mentions Claude Code, is not Claude Code.
+# What counts is a line that is exactly what `claude --version` prints:
+# "<version> (Claude Code)". It does not have to be the first line, so a warning
+# printed ahead of the banner does not turn a real Claude Code away, but it has
+# to be among the first 4096 characters of the answer. A different tool, or an
+# error that merely mentions Claude Code, does not say that.
 is_claude_code() { # is_claude_code <binary>
-  local out="" said=""
+  local out="" said="" rest="" line=""
   out="$(mktemp "${TMPDIR:-/tmp}/claude-probe.XXXXXX" 2>/dev/null)" || out=""
   if [ -n "$out" ]; then
     run_bounded "$1" --version >"$out" 2>&1 || true
@@ -196,10 +198,20 @@ is_claude_code() { # is_claude_code <binary>
   else
     said="$(run_bounded "$1" --version 2>&1 || true)"
   fi
-  case "${said%%$'\n'*}" in
-    *" "*" (Claude Code)") ;;
-    [0-9]*" (Claude Code)") return 0 ;;
-  esac
+  # Only the start of the answer is looked at. The banner is one short line, and
+  # going through pages of output one line at a time takes bash far longer than
+  # that is worth: the time grows much faster than the length does.
+  said="${said:0:4096}"
+  rest="$said"
+  while [ -n "$rest" ]; do
+    line="${rest%%$'\n'*}"
+    case "$line" in
+      *" "*" (Claude Code)") ;;
+      [0-9]*" (Claude Code)") return 0 ;;
+    esac
+    [ "$line" = "$rest" ] && break
+    rest="${rest#*$'\n'}"
+  done
   return 1
 }
 
