@@ -16,8 +16,12 @@ catch:
     with the wrong argv -- which is exactly the shape of bug a test has to
     catch, because a person never will.
 
-Hermetic: `claude` is a shim on PATH, the venv interpreter is pre-made, so
-nothing here touches the real Claude Code config, pip, or the network.
+Hermetic: `claude` is a shim on a sealed PATH, the venv interpreter is
+pre-made, so nothing here touches the real Claude Code config, pip, or the
+network. That is enforced, not hoped for: every installer run gets a throwaway
+profile and a PATH that cannot reach a real `claude`, and refuses to start if
+one could be reached (see "Keeping the installer away from the developer's
+real Claude Code" below).
 """
 
 import os
@@ -48,6 +52,118 @@ def _write(path: Path, body: str) -> None:
     path.write_text(body, encoding="ascii", newline="\r\n")
 
 
+# --------------------------------------------------------------------------
+# Keeping the installer away from the developer's real Claude Code
+#
+# install.ps1 ends by running `claude mcp add ... -s user`. If a real Claude
+# Code is the one that answers, that writes a connector into the developer's
+# own config, pointing at a pytest temp directory that is gone by the next
+# run, and every Claude Code session on the machine then shows it as failing.
+# A test that deletes its own fake claude.cmd and runs the installer on the
+# machine's real PATH is all it takes.
+#
+# So two layers, neither of which depends on a test remembering anything:
+#   * every run gets a profile (HOME, USERPROFILE, APPDATA, LOCALAPPDATA) and a
+#     CLAUDE_CONFIG_DIR inside its own tmp dir, so even a real claude reached
+#     by mistake could only write a throwaway config;
+#   * every run gets a sealed PATH (the fixture's own dir, the interpreter
+#     running these tests, and the Windows system dirs, nothing else) and first
+#     checks that `claude` cannot resolve to anything outside its tmp dir,
+#     refusing to start if it can.
+#
+# Neither layer can be exercised from a non-Windows host, because the whole
+# module is skipped there; the guard's own tests below run on the Windows job.
+# --------------------------------------------------------------------------
+
+# The names `claude` can go by on a PATH entry: the bare name, the usual
+# executable and script extensions, and the .ps1 that npm installs next to
+# claude.cmd. A bare file is included on purpose: flagging one PowerShell would
+# not run is the safe direction for a guard.
+_CLAUDE_NAMES = tuple("claude" + ext for ext in ("", ".exe", ".cmd", ".bat", ".com", ".ps1"))
+_PROFILE_KEYS = ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "CLAUDE_CONFIG_DIR")
+
+
+def _throwaway_profile(root: Path) -> dict:
+    """Every place a user profile or a Claude config is looked up, all inside `root`."""
+    dirs = {
+        "HOME": root / "home",
+        "USERPROFILE": root / "home",
+        "APPDATA": root / "appdata",
+        "LOCALAPPDATA": root / "localappdata",
+        "CLAUDE_CONFIG_DIR": root / "claude-config",
+    }
+    for d in dirs.values():
+        d.mkdir(parents=True, exist_ok=True)
+    return {key: str(d) for key, d in dirs.items()}
+
+
+def _system_dirs() -> list:
+    """The few Windows directories a PowerShell run needs on PATH, and no others."""
+    system_root = os.environ.get("SystemRoot") or r"C:\Windows"
+    return [
+        os.path.join(system_root, "System32"),
+        system_root,
+        os.path.join(system_root, "System32", "Wbem"),
+        os.path.join(system_root, "System32", "WindowsPowerShell", "v1.0"),
+    ]
+
+
+def _sealed_path(box, *front) -> str:
+    """The fixture's own dir, the interpreter running these tests, the system dirs.
+
+    sys.base_prefix is there because the installer looks for a python on PATH,
+    and because the pre-made venv's python.exe is a bare copy of this
+    interpreter's, which may need its original directory on PATH to find its DLL.
+    Once the machine's real PATH is gone nothing else supplies either. `front`
+    goes first, for a test that needs one more directory ahead of the rest.
+    """
+    return os.pathsep.join([*(str(p) for p in front), str(box["bin"]), sys.base_prefix, *_system_dirs()])
+
+
+def _claude_on(path_value: str) -> list:
+    """Every file `claude` could resolve to on this PATH."""
+    found = []
+    for entry in path_value.split(os.pathsep):
+        if not entry:
+            continue
+        for name in _CLAUDE_NAMES:
+            candidate = Path(entry) / name
+            if candidate.is_file():
+                found.append(candidate)
+    return found
+
+
+def _assert_nothing_real_is_reachable(env: dict, root: Path, *, shim_expected: bool) -> None:
+    """Refuse to run the installer unless it can only touch things inside `root`.
+
+    `claude` must resolve to nothing at all (`shim_expected=False`: a test that
+    needs `claude` to be absent from PATH also depends on this, because a PATH
+    that quietly still found one would pass it for the wrong reason), or to
+    shims inside `root`. The profile directories and CLAUDE_CONFIG_DIR must point
+    inside `root` as well, and so must CLAUDE_CODE_EXECPATH if it is set:
+    install.ps1 does not read that variable today, but a guard that stays the
+    same as the POSIX one also covers the day it does.
+    """
+    root = root.resolve()
+    found = _claude_on(env.get("PATH", ""))
+    if found:
+        assert shim_expected, f"expected no claude on this PATH, but it resolves to {found[0]}"
+        for candidate in found:
+            assert candidate.resolve().is_relative_to(root), (
+                f"a real claude is reachable on the fixture PATH: {candidate}. install.ps1 would "
+                f"run `claude mcp add ... -s user` against it for real. PATH={env.get('PATH')}"
+            )
+    for key in _PROFILE_KEYS:
+        assert Path(env[key]).resolve().is_relative_to(root), (
+            f"{key} must point inside this test's own tmp dir, got {env[key]!r}"
+        )
+    execpath = env.get("CLAUDE_CODE_EXECPATH")
+    if execpath:
+        assert Path(execpath).resolve().is_relative_to(root), (
+            f"CLAUDE_CODE_EXECPATH must point inside this test's own tmp dir, got {execpath!r}"
+        )
+
+
 @pytest.fixture
 def box(tmp_path):
     """A sealed repo + a fake `claude` that records the argv it is handed."""
@@ -74,6 +190,9 @@ def box(tmp_path):
     )
     # Shaped exactly like npm's shim: a .cmd forwarding its raw %* command line.
     _write(bindir / "claude.cmd", f'@ECHO off\n"{sys.executable}" "{recorder}" %*\n')
+    # The installer only checks that git exists, and the PATH is sealed, so the
+    # machine's real one is not there to be found.
+    _write(bindir / "git.cmd", "@ECHO off\nEXIT /B 0\n")
 
     _make_stub_venv(repo / ".venv")
 
@@ -102,10 +221,18 @@ def _make_stub_venv(venv: Path) -> None:
     )
 
 
-def _run(box, **env_overrides):
+def _installer_env(box, **env_overrides) -> dict:
+    """The environment one installer run gets: the machine's own, minus anything
+    that could point it at a real Claude Code, plus a sealed PATH and a profile
+    that lives inside the test's tmp dir."""
     env = dict(os.environ)
-    env["PATH"] = f"{box['bin']}{os.pathsep}{env['PATH']}"
-    env.pop("GWS_PYTHON", None)
+    # Popped so the host's own values -- this suite may itself be running inside
+    # a Claude Code session -- can never leak into a run that means to control
+    # them explicitly.
+    for key in ("GWS_PYTHON", "CLAUDE_CODE_EXECPATH"):
+        env.pop(key, None)
+    env["PATH"] = _sealed_path(box)
+    env.update(_throwaway_profile(box["tmp"]))
     env["GWS_CLIENT_ID"] = ID
     env["GWS_CLIENT_SECRET"] = SECRET
     env["NO_COLOR"] = "1"
@@ -118,6 +245,12 @@ def _run(box, **env_overrides):
             env.pop(k, None)
         else:
             env[k] = v
+    return env
+
+
+def _run(box, *, shim_expected=True, **env_overrides):
+    env = _installer_env(box, **env_overrides)
+    _assert_nothing_real_is_reachable(env, box["tmp"], shim_expected=shim_expected)
     proc = subprocess.run(
         [
             POWERSHELL,
@@ -246,9 +379,15 @@ def test_a_broken_python_override_fails_instead_of_searching_past_it(box):
 
 def test_no_claude_on_path_registers_nothing(box):
     (box["bin"] / "claude.cmd").unlink()
-    proc, calls = _run(box)
+    # shim_expected=False: the guard itself checks that nothing on the sealed
+    # PATH can answer to `claude`, so a real one cannot be the thing that runs.
+    proc, calls = _run(box, shim_expected=False)
     assert proc.returncode != 0
     assert "mcp\tadd" not in calls
+    # It has to fail for this reason and no other. With a sealed PATH, a missing
+    # python or git would also end the run with a non-zero exit and nothing
+    # registered, and this test would pass without having tested anything.
+    assert "Claude Code is not installed" in proc.stdout + proc.stderr
 
 
 # --------------------------------------------------------------------------
@@ -268,8 +407,7 @@ def test_the_store_placeholder_is_not_mistaken_for_python(box, tmp_path):
     )
     shutil.copy(fake_store / "python.cmd", fake_store / "python3.cmd")
 
-    env_path = f"{fake_store}{os.pathsep}{box['bin']}{os.pathsep}{os.environ['PATH']}"
-    proc, calls = _run(box, PATH=env_path)
+    proc, calls = _run(box, PATH=_sealed_path(box, fake_store))
 
     # It must find the real interpreter behind the placeholder, not stop at it.
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -343,3 +481,114 @@ def test_the_script_parses():
         timeout=120,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+# --------------------------------------------------------------------------
+# The harness itself
+#
+# The guard that keeps the installer away from a real Claude Code is only worth
+# having if it can fail. These show that the environment every run gets passes
+# it, that it fails on the things it exists to catch, that a run cannot skip
+# it, and that the `claude` the installer launches really does receive the
+# throwaway profile.
+# --------------------------------------------------------------------------
+
+
+def test_the_environment_every_run_gets_passes_the_guard(box):
+    """With claude.cmd in place the sealed PATH resolves `claude` to the shim,
+    and with it gone to nothing: never to whatever the host has installed."""
+    _assert_nothing_real_is_reachable(_installer_env(box), box["tmp"], shim_expected=True)
+
+    (box["bin"] / "claude.cmd").unlink()
+    _assert_nothing_real_is_reachable(_installer_env(box), box["tmp"], shim_expected=False)
+
+
+@pytest.mark.parametrize("name", _CLAUDE_NAMES)
+def test_the_guard_fails_when_a_real_claude_is_reachable(tmp_path, name):
+    """Negative control. On a machine with no `claude` at all (CI) every test
+    above passes with the guard deleted, so the guard has to be shown failing,
+    for each way `claude` can turn up on a Windows PATH."""
+    root = tmp_path / "fixture"
+    root.mkdir()
+    host = tmp_path / "host-install"  # stands in for wherever a real claude lives
+    host.mkdir()
+    (host / name).write_text("stand-in\n")
+    env = {"PATH": str(host), **_throwaway_profile(root)}
+
+    with pytest.raises(AssertionError, match="real claude is reachable"):
+        _assert_nothing_real_is_reachable(env, root, shim_expected=True)
+    with pytest.raises(AssertionError, match="expected no claude"):
+        _assert_nothing_real_is_reachable(env, root, shim_expected=False)
+
+
+@pytest.mark.parametrize("key", _PROFILE_KEYS)
+def test_the_guard_fails_when_the_profile_would_not_be_a_throwaway(tmp_path, key):
+    """Negative control for the other layer: a profile directory or a
+    CLAUDE_CONFIG_DIR that points outside the test's own tmp dir is refused."""
+    root = tmp_path / "fixture"
+    root.mkdir()
+    elsewhere = tmp_path / "somewhere-else"
+    elsewhere.mkdir()
+    env = {"PATH": str(root / "empty"), **_throwaway_profile(root), key: str(elsewhere)}
+
+    with pytest.raises(AssertionError, match=key):
+        _assert_nothing_real_is_reachable(env, root, shim_expected=False)
+
+
+def test_the_guard_fails_when_claude_code_execpath_points_outside_the_tmp_dir(tmp_path):
+    root = tmp_path / "fixture"
+    root.mkdir()
+    elsewhere = tmp_path / "somewhere-else"
+    elsewhere.mkdir()
+    outside = elsewhere / "claude.exe"
+    outside.write_text("stand-in\n")
+    inside = root / "claude.exe"
+    inside.write_text("stand-in\n")
+    env = {"PATH": str(root / "empty"), **_throwaway_profile(root)}
+
+    with pytest.raises(AssertionError, match="CLAUDE_CODE_EXECPATH"):
+        _assert_nothing_real_is_reachable({**env, "CLAUDE_CODE_EXECPATH": str(outside)}, root, shim_expected=False)
+    _assert_nothing_real_is_reachable({**env, "CLAUDE_CODE_EXECPATH": str(inside)}, root, shim_expected=False)
+    # An empty value counts as not set, as it does for the installer.
+    _assert_nothing_real_is_reachable({**env, "CLAUDE_CODE_EXECPATH": ""}, root, shim_expected=False)
+
+
+def test_the_runner_checks_the_guard_before_it_starts_the_installer(box, monkeypatch):
+    """The guard protects nothing if a run can skip it, so deleting the guard
+    call from `_run` has to turn a test red."""
+
+    class GuardReached(Exception):
+        pass
+
+    def tripwire(env, root, *, shim_expected):
+        raise GuardReached
+
+    monkeypatch.setattr(sys.modules[__name__], "_assert_nothing_real_is_reachable", tripwire)
+
+    with pytest.raises(GuardReached):
+        _run(box)
+
+
+def test_the_claude_the_installer_runs_only_sees_a_throwaway_profile(box):
+    """What matters is not what the harness hands the installer but what the
+    `claude` the installer launches actually receives."""
+    seen = box["tmp"] / "seen-by-claude.log"
+    probe = box["tmp"] / "seen-by-claude.py"
+    probe.write_text(
+        "import os\n"
+        f"with open(r'{seen}', 'a', encoding='utf-8') as f:\n"
+        f"    f.write('|'.join(os.environ.get(k, '') for k in {_PROFILE_KEYS!r}) + '\\n')\n",
+        encoding="utf-8",
+    )
+    _write(box["bin"] / "claude.cmd", f'@ECHO off\n"{sys.executable}" "{probe}" %*\n')
+
+    proc, _ = _run(box)
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    runs = [line.split("|") for line in seen.read_text(encoding="utf-8").splitlines()]
+    assert len(runs) == 2, f"expected the remove and the add, got {runs!r}"
+    root = box["tmp"].resolve()
+    for values in runs:
+        assert len(values) == len(_PROFILE_KEYS), values
+        for key, value in zip(_PROFILE_KEYS, values):
+            assert Path(value).resolve().is_relative_to(root), f"{key}={value!r}"
