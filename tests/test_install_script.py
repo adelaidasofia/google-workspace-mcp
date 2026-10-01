@@ -864,6 +864,23 @@ def test_an_execpath_is_still_used_where_perl_is_missing(bare_box, tmp_path):
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_an_execpath_is_still_used_where_mktemp_is_missing(bare_box, tmp_path):
+    """The probe writes its answer to a scratch file, but a missing or unusable
+    mktemp must not mean a refused Claude Code: it falls back to reading the
+    answer through $(...), slower to give up on a child but still asked."""
+    (bare_box["bin"] / "mktemp").unlink()
+    execpath = tmp_path / "claude"
+    _recording_claude(execpath, bare_box["log"], "2.1.281 (Claude Code)")
+    # Control: this PATH really has no mktemp, so the fallback is the branch that runs.
+    assert _command_found_on(_sealed_env(bare_box), "mktemp") == ""
+
+    proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "mcp add google-workspace" in calls
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not found")
 def test_a_failed_registration_names_the_binary_that_was_run(bare_box, tmp_path):
     """The hint for seeing the error has to be a command that works for the
     person reading it. The desktop app's copy of Claude Code is not on PATH, so
