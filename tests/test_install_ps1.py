@@ -66,10 +66,10 @@ def _write(path: Path, body: str) -> None:
 #   * every run gets a profile (HOME, USERPROFILE, APPDATA, LOCALAPPDATA) and a
 #     CLAUDE_CONFIG_DIR inside its own tmp dir, so even a real claude reached
 #     by mistake could only write a throwaway config;
-#   * every run gets a sealed PATH (the fixture's own dir, the interpreter
-#     running these tests, and the Windows system dirs, nothing else) and first
-#     checks that `claude` cannot resolve to anything outside its tmp dir,
-#     refusing to start if it can.
+#   * every run gets a sealed PATH (the fixture's own dir, the base install of
+#     the interpreter running these tests, and the Windows system dirs, nothing
+#     else) and first checks that `claude` cannot resolve to anything outside
+#     its tmp dir, refusing to start if it can.
 #
 # Neither layer can be exercised from a non-Windows host, because the whole
 # module is skipped there; the guard's own tests below run on the Windows job.
@@ -109,13 +109,20 @@ def _system_dirs() -> list:
 
 
 def _sealed_path(box, *front) -> str:
-    """The fixture's own dir, the interpreter running these tests, the system dirs.
+    """The fixture's own dir, the base install of the interpreter running these
+    tests (sys.base_prefix), the system dirs.
 
     sys.base_prefix is there because the installer looks for a python on PATH,
     and because the pre-made venv's python.exe is a bare copy of this
     interpreter's, which may need its original directory on PATH to find its DLL.
     Once the machine's real PATH is gone nothing else supplies either. `front`
     goes first, for a test that needs one more directory ahead of the rest.
+
+    What this PATH does not reliably carry is the `py` launcher. An all-users
+    install puts it in the Windows directory, which is here, but a per-user
+    install puts it in a directory of its own, which is not. A test that needs a
+    launcher brings its own (see `_launcher_stand_in`) and does not depend on
+    whether, or where, the machine has one.
     """
     return os.pathsep.join([*(str(p) for p in front), str(box["bin"]), sys.base_prefix, *_system_dirs()])
 
@@ -395,8 +402,39 @@ def test_no_claude_on_path_registers_nothing(box):
 # --------------------------------------------------------------------------
 
 
+def _launcher_stand_in(box) -> None:
+    """Put a `py` in the fixture's own dir that answers the way the Python
+    launcher does for `py -3`: it drops the version selector and runs the
+    interpreter that is running these tests, with everything else it was given.
+
+    The installer asks the launcher before it tries any name, and with the Store
+    placeholders in front of `python` and `python3` the launcher is how it gets
+    past them to a real interpreter. The sealed PATH keeps the Windows directory,
+    where an all-users install puts the launcher, and drops the directory a
+    per-user install uses. So a test that depends on one would pass or fail by
+    where the machine happens to have it. This one is the fixture's own, and it
+    comes ahead of any real one on the PATH.
+    """
+    forwarder = box["tmp"] / "py_stand_in.py"
+    forwarder.write_text(
+        "import subprocess, sys\n"
+        "args = sys.argv[1:]\n"
+        "if args and args[0].startswith('-3'):\n"
+        "    args = args[1:]\n"
+        "sys.exit(subprocess.run([sys.executable] + args).returncode)\n",
+        encoding="utf-8",
+    )
+    # Shaped like claude.cmd above: a .cmd forwarding its raw %* command line.
+    _write(box["bin"] / "py.cmd", f'@ECHO off\n"{sys.executable}" "{forwarder}" %*\n')
+
+
 def test_the_store_placeholder_is_not_mistaken_for_python(box, tmp_path):
-    """A WindowsApps python.exe exists, resolves, and never runs Python."""
+    """A WindowsApps python.exe exists, resolves, and never runs Python.
+
+    The placeholders here stand in front of `python` and `python3`, so the way to
+    a real interpreter is the `py` launcher. This test brings its own
+    (`_launcher_stand_in`), and does not rely on the machine having one in a
+    directory the sealed PATH keeps."""
     fake_store = tmp_path / "WindowsApps"
     fake_store.mkdir()
     # A stub that behaves like the real one: prints its nag line, exits 9009.
@@ -406,6 +444,7 @@ def test_the_store_placeholder_is_not_mistaken_for_python(box, tmp_path):
         " from the Microsoft Store\r\nEXIT /B 9009\r\n",
     )
     shutil.copy(fake_store / "python.cmd", fake_store / "python3.cmd")
+    _launcher_stand_in(box)
 
     proc, calls = _run(box, PATH=_sealed_path(box, fake_store))
 
