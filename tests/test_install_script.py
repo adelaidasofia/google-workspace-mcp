@@ -550,6 +550,27 @@ def _probe_leftovers(fx) -> list:
     return sorted(p.name for p in (fx["root"] / "tmp").glob("claude-probe.*"))
 
 
+def _hint_words(stderr: str) -> list:
+    """The words a real shell reads from the line the installer prints for
+    seeing why `mcp add` failed.
+
+    The line is for pasting, so the only honest check is to give it to a shell
+    and see what comes back; reading the quotes by eye would pass a line that
+    expands a `$` or runs a backtick. Whatever the quoting gets wrong shows up
+    here as a different word.
+    """
+    lines = stderr.splitlines()
+    marker = [i for i, ln in enumerate(lines) if "Run this to see the error" in ln]
+    assert marker, f"no hint in the installer's output: {stderr!r}"
+    hint = lines[marker[0] + 1].strip()
+    proc = subprocess.run(
+        [BASH, "-c", 'eval "set -- $1"; printf "%s\\0" "$@"', "bash", hint],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert proc.returncode == 0, f"the hint does not parse as shell words: {hint!r}\n{proc.stderr}"
+    return proc.stdout.split("\0")[:-1]
+
+
 def _require_perl(fx) -> None:
     """The ten-second bound is perl's alarm: a test of it needs perl on the sealed PATH."""
     if not (fx["bin"] / "perl").exists():
@@ -746,7 +767,34 @@ def test_a_failed_registration_names_the_binary_that_was_run(bare_box, tmp_path)
 
     assert proc.returncode != 0
     assert "Could not register the connector" in proc.stderr, proc.stderr
-    assert f'"{execpath}" mcp add google-workspace' in proc.stderr, proc.stderr
+    assert f"'{execpath}' mcp add google-workspace" in proc.stderr, proc.stderr
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_the_failed_registration_hint_survives_an_odd_path(bare_box, tmp_path):
+    """The hint is for pasting into a shell, and a path in it can hold anything a
+    filename can: spaces, quotes, a `$`, a backtick. Quoted wrongly, the pasted
+    line expands or runs something and starts a different command from the one
+    that failed. Every word read back has to be exactly what ran, the binary and
+    the interpreter and server paths alike."""
+    odd = "odd 'single' \"double\" $HOME `echo hi` ;&(x)"
+    execdir = tmp_path / odd / "Application Support"
+    execdir.mkdir(parents=True)
+    execpath = execdir / "claude"
+    _recording_claude(execpath, bare_box["log"], "2.1.281 (Claude Code)", add_exit=1)
+    # The clone lives under an odd path too, so $VENV_PY and $SCRIPT_DIR are covered.
+    repo = tmp_path / odd / "repo"
+    shutil.copytree(bare_box["repo"], repo, symlinks=True)
+    bare_box["repo"] = repo
+
+    proc, _ = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
+
+    assert proc.returncode != 0
+    assert _hint_words(proc.stderr) == [
+        str(execpath), "mcp", "add", "google-workspace", "-s", "user",
+        "-e", "GWS_CLIENT_ID=...", "-e", "GWS_CLIENT_SECRET=...", "--",
+        str(repo / ".venv" / "bin" / "python"), str(repo / "server.py"),
+    ]
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not found")
@@ -760,6 +808,11 @@ def test_a_failed_registration_through_claude_on_path_still_says_claude(sealed):
 
     assert proc.returncode != 0
     assert "     claude mcp add google-workspace" in proc.stderr, proc.stderr
+    assert _hint_words(proc.stderr) == [
+        "claude", "mcp", "add", "google-workspace", "-s", "user",
+        "-e", "GWS_CLIENT_ID=...", "-e", "GWS_CLIENT_SECRET=...", "--",
+        str(sealed["repo"] / ".venv" / "bin" / "python"), str(sealed["repo"] / "server.py"),
+    ]
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not found")

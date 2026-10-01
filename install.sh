@@ -338,9 +338,15 @@ step "Connecting it to Claude Code"
 
 # If registering fails, the person is told what to run to see why. That has to be
 # the binary that was just run: the desktop app's copy is not on PATH, so a bare
-# `claude` would be a command that does not exist for them. Its path has spaces in
-# it ("Application Support"), so it is quoted so that it can be pasted as it is.
-if [ "$CLAUDE_BIN" = "claude" ]; then CLAUDE_CMD="claude"; else CLAUDE_CMD="\"$CLAUDE_BIN\""; fi
+# `claude` would be a command that does not exist for them. Every path in it goes
+# through shq, so one with a space in it ("Application Support"), a quote or a `$`
+# can still be pasted as it is.
+shq() { # shq <string> -> <string> as one shell word, read back exactly as it was
+  case "$1" in
+    ""|*[!_./:=@%+,[:alnum:]-]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
 
 "$CLAUDE_BIN" mcp add "$SERVER_NAME" -s user \
   -e "GWS_CLIENT_ID=$CLIENT_ID" \
@@ -348,7 +354,7 @@ if [ "$CLAUDE_BIN" = "claude" ]; then CLAUDE_CMD="claude"; else CLAUDE_CMD="\"$C
   -- "$VENV_PY" "$SCRIPT_DIR/server.py" >/dev/null || die \
 "Could not register the connector with Claude Code.
    Run this to see the error:
-     $CLAUDE_CMD mcp add $SERVER_NAME -s user -e GWS_CLIENT_ID=... -e GWS_CLIENT_SECRET=... -- $VENV_PY $SCRIPT_DIR/server.py"
+     $(shq "$CLAUDE_BIN") mcp add $SERVER_NAME -s user -e GWS_CLIENT_ID=... -e GWS_CLIENT_SECRET=... -- $(shq "$VENV_PY") $(shq "$SCRIPT_DIR/server.py")"
 
 ok "registered as \"$SERVER_NAME\""
 
