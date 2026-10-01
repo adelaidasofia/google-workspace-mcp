@@ -13,10 +13,10 @@ This is the setup path for someone who wants Claude to connect their Gmail, Cale
 
 ## Security model
 
-- The Google app is theirs, inside their own Google account. No one else can use it.
+- The Google app is theirs, inside their own Google account. Once it is published, anyone who has its Client ID and secret can open a sign-in screen for it, so both stay private.
 - Tokens stay on their computer, in the operating system's credential store. No third-party server is involved.
 - "Google hasn't verified this app" is expected for a personal app. Continuing past it on their own app is safe.
-- Publishing the app ("In production") only removes the 7-day logout that Testing mode imposes. It does not list the app anywhere or make it public.
+- Publishing the app ("In production") removes the 7-day logout that Testing mode imposes. It does not list the app anywhere, but any Google account can then authorize it, after the "Google hasn't verified this app" click-through.
 - A Desktop client's "client secret" identifies the app. Google treats it as non-confidential for desktop apps, so passing it to the installer is fine.
 
 ## Steps
