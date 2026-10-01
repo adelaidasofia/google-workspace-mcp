@@ -179,9 +179,11 @@ run_bounded() {
 # grep: under `set -o pipefail` a binary that printed its banner and then exited
 # non-zero would fail the whole pipeline and be thrown out as "not Claude Code",
 # when what it said is the only thing being asked about. Both streams are read:
-# a banner printed only on stderr is still a banner. Where there is no usable
-# mktemp the answer is read through $(...) instead, which is only slower to give
-# up on such a child.
+# a banner printed only on stderr is still a banner. A TMPDIR that names a
+# directory that does not exist does not change any of that: the file is made in
+# /tmp instead. Only where there is no usable mktemp at all is the answer read
+# through $(...), and that waits for a child that keeps the output open for as
+# long as the child does.
 #
 # What counts is a line that is exactly what `claude --version` prints:
 # "<version> (Claude Code)". It does not have to be the first line, so a warning
@@ -190,7 +192,7 @@ run_bounded() {
 # error that merely mentions Claude Code, does not say that.
 is_claude_code() { # is_claude_code <binary>
   local out="" said="" rest="" line=""
-  out="$(mktemp "${TMPDIR:-/tmp}/claude-probe.XXXXXX" 2>/dev/null)" || out=""
+  out="$(mktemp "${TMPDIR:-/tmp}/claude-probe.XXXXXX" 2>/dev/null || mktemp /tmp/claude-probe.XXXXXX 2>/dev/null)" || out=""
   if [ -n "$out" ]; then
     run_bounded "$1" --version >"$out" 2>&1 || true
     said="$(cat "$out" 2>/dev/null || true)"

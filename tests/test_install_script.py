@@ -21,6 +21,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -516,7 +517,9 @@ def _hanging_claude(path: Path) -> None:
     _exe(path, f'#!/bin/sh\nexec "{sleeper}" {HANG_SECONDS}\n')
 
 
-def _claude_with_a_lingering_child(path: Path, log: Path, *, answers: bool) -> None:
+def _claude_with_a_lingering_child(
+    path: Path, log: Path, *, answers: bool, banner: str = "2.1.281 (Claude Code)"
+) -> None:
     """A binary that starts a long-lived child when it is asked for its version.
 
     The child inherits the binary's stdout and stderr and keeps them open for
@@ -526,12 +529,14 @@ def _claude_with_a_lingering_child(path: Path, log: Path, *, answers: bool) -> N
     child, so it cannot answer inside the installer's ten seconds. Either way the
     installer must not wait for the child: a shell waits for the process it
     started, not for everything that inherited the output it was given.
+
+    `banner` is what it prints as its answer.
     """
     sleeper = shutil.which("sleep")
     if answers:
-        version = f'  echo "2.1.281 (Claude Code)"\n  "{sleeper}" {HANG_SECONDS} &\n  exit 0\n'
+        version = f'  echo "{banner}"\n  "{sleeper}" {HANG_SECONDS} &\n  exit 0\n'
     else:
-        version = f'  "{sleeper}" {HANG_SECONDS} &\n  wait\n  echo "2.1.281 (Claude Code)"\n  exit 0\n'
+        version = f'  "{sleeper}" {HANG_SECONDS} &\n  wait\n  echo "{banner}"\n  exit 0\n'
     _exe(
         path,
         f"""#!/bin/sh
@@ -549,6 +554,23 @@ exit 0
 def _probe_leftovers(fx) -> list:
     """Scratch files the version probe left behind in the run's TMPDIR."""
     return sorted(p.name for p in (fx["root"] / "tmp").glob("claude-probe.*"))
+
+
+def _probe_leftovers_in_the_shared_tmp(marker: str) -> list:
+    """Scratch files the version probe left behind in the machine's own /tmp.
+
+    That directory is shared with everything else on the machine, so only a file
+    that holds `marker`, which nothing but this run's stand-in prints, is this
+    run's.
+    """
+    left = []
+    for p in Path("/tmp").glob("claude-probe.*"):
+        try:
+            if marker in p.read_text(errors="replace"):
+                left.append(p.name)
+        except OSError:
+            continue
+    return sorted(left)
 
 
 def _assert_the_app_copy_was_refused(proc, execpath) -> None:
@@ -889,6 +911,62 @@ def test_a_child_that_keeps_the_output_open_does_not_stretch_the_wait(bare_box, 
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "mcp add google-workspace" in calls
     assert _probe_leftovers(bare_box) == []
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_a_tmpdir_that_does_not_exist_does_not_bring_back_the_wait_for_a_child(bare_box, tmp_path):
+    """A TMPDIR that names a directory that does not exist is not "no mktemp": the
+    scratch file is made in /tmp instead, so the answer still goes through a file
+    and a child that keeps the output open still cannot stretch the wait. Read
+    through $(...) instead, the installer would wait for that child to finish.
+
+    /tmp is the machine's own, shared directory, so the stand-in prints a banner
+    no one else prints, and only a scratch file that holds it counts as left
+    behind by this run."""
+    if not os.access("/tmp", os.W_OK):
+        pytest.skip("/tmp is not writable here, so there is no fallback scratch file to test")
+    banner = f"2.1.{os.getpid()}.{time.time_ns()} (Claude Code)"
+    execpath = tmp_path / "claude-leaves-a-child"
+    _claude_with_a_lingering_child(execpath, bare_box["log"], answers=True, banner=banner)
+    gone = tmp_path / "no-such-dir"
+    # Control: mktemp really cannot use this TMPDIR, so the retry is what is tested.
+    assert not gone.exists()
+
+    started = time.monotonic()
+    proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath), TMPDIR=str(gone))
+    elapsed = time.monotonic() - started
+
+    assert elapsed < HANG_SECONDS - 20, (
+        f"the installer waited for a child of the binary it asked: it took {elapsed:.0f}s, "
+        f"and the child lives for {HANG_SECONDS}s"
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "mcp add google-workspace" in calls
+    assert not gone.exists()
+    assert _probe_leftovers(bare_box) == []
+    assert _probe_leftovers_in_the_shared_tmp(banner.split(" ")[0]) == []
+
+
+def test_the_shared_tmp_check_sees_a_scratch_file_that_holds_its_marker():
+    """Negative control for the check above, which would pass for any file name or
+    place it was not looking at: a scratch file shaped like the probe's, holding
+    the marker, has to be found, and one holding something else must not be."""
+    if not os.access("/tmp", os.W_OK):
+        pytest.skip("/tmp is not writable here")
+    marker = f"2.1.{os.getpid()}.{time.time_ns()}"
+    planted = []
+    try:
+        for text in (f"{marker} (Claude Code)\n", "something else\n"):
+            fd, name = tempfile.mkstemp(prefix="claude-probe.", dir="/tmp")
+            planted.append(Path(name))
+            with os.fdopen(fd, "w") as handle:
+                handle.write(text)
+
+        assert _probe_leftovers_in_the_shared_tmp(marker) == [planted[0].name]
+    finally:
+        for p in planted:
+            p.unlink(missing_ok=True)
+    assert _probe_leftovers_in_the_shared_tmp(marker) == []
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not found")
