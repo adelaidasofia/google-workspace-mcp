@@ -182,6 +182,10 @@ run_bounded() {
 # a banner printed only on stderr is still a banner. Where there is no usable
 # mktemp the answer is read through $(...) instead, which is only slower to give
 # up on such a child.
+#
+# What counts is the first line, and only if it is exactly what `claude
+# --version` prints: "<version> (Claude Code)". A different tool, or an error
+# that merely mentions Claude Code, is not Claude Code.
 is_claude_code() { # is_claude_code <binary>
   local out="" said=""
   out="$(mktemp "${TMPDIR:-/tmp}/claude-probe.XXXXXX" 2>/dev/null)" || out=""
@@ -192,7 +196,10 @@ is_claude_code() { # is_claude_code <binary>
   else
     said="$(run_bounded "$1" --version 2>&1 || true)"
   fi
-  case "$said" in *"Claude Code"*) return 0 ;; esac
+  case "${said%%$'\n'*}" in
+    *" "*" (Claude Code)") ;;
+    [0-9]*" (Claude Code)") return 0 ;;
+  esac
   return 1
 }
 
