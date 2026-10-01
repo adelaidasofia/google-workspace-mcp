@@ -120,9 +120,10 @@ def _sealed_path(box, *front) -> str:
 
     What this PATH does not reliably carry is the `py` launcher. An all-users
     install puts it in the Windows directory, which is here, but a per-user
-    install puts it in a directory of its own, which is not. A test that needs a
-    launcher brings its own (see `_launcher_stand_in`) and does not depend on
-    whether, or where, the machine has one.
+    install puts it in a directory of its own, which is not. A test whose outcome
+    depends on what the installer's search does with the launcher provides what
+    it needs in the fixture's own dir, ahead of anything real, and does not depend
+    on whether, or where, the machine has one (see `_interpreter_past_the_stubs`).
     """
     return os.pathsep.join([*(str(p) for p in front), str(box["bin"]), sys.base_prefix, *_system_dirs()])
 
@@ -402,56 +403,79 @@ def test_no_claude_on_path_registers_nothing(box):
 # --------------------------------------------------------------------------
 
 
-def _launcher_stand_in(box) -> None:
-    """Put a `py` in the fixture's own dir that answers the way the Python
-    launcher does for `py -3`: it drops the version selector and runs the
-    interpreter that is running these tests, with everything else it was given.
-
-    The installer asks the launcher before it tries any name, and with the Store
-    placeholders in front of `python` and `python3` the launcher is how it gets
-    past them to a real interpreter. The sealed PATH keeps the Windows directory,
-    where an all-users install puts the launcher, and drops the directory a
-    per-user install uses. So a test that depends on one would pass or fail by
-    where the machine happens to have it. This one is the fixture's own, and it
-    comes ahead of any real one on the PATH.
-    """
-    forwarder = box["tmp"] / "py_stand_in.py"
-    forwarder.write_text(
-        "import subprocess, sys\n"
-        "args = sys.argv[1:]\n"
-        "if args and args[0].startswith('-3'):\n"
-        "    args = args[1:]\n"
-        "sys.exit(subprocess.run([sys.executable] + args).returncode)\n",
-        encoding="utf-8",
+def _store_stub(path: Path, log: Path) -> None:
+    """A stand-in for one of the Microsoft Store's python.exe placeholders. It
+    writes a line to `log` when it is launched, prints the nag line the real one
+    prints, and exits 9009, as the real one does."""
+    _write(
+        path,
+        f'@ECHO off\nECHO %~nx0 was launched>>"{log}"\n'
+        "ECHO Python was not found; run without arguments to install from the Microsoft Store\n"
+        "EXIT /B 9009\n",
     )
-    # Shaped like claude.cmd above: a .cmd forwarding its raw %* command line.
-    _write(box["bin"] / "py.cmd", f'@ECHO off\n"{sys.executable}" "{forwarder}" %*\n')
+
+
+def _interpreter_past_the_stubs(box) -> None:
+    """Put in the fixture's own dir what the installer's search needs once it has
+    gone past the Store placeholders: a `py` that fails, and the interpreter that
+    is running these tests under the name `python3.12`.
+
+    The installer asks the launcher first and takes the first interpreter that
+    answers. With a launcher that answers, the search ends there and never reaches
+    `python` and `python3`, which are the placeholders in the test below, so it
+    could not tell whether they are skipped; and whether a real launcher is on the
+    sealed PATH at all depends on how the machine has it installed. A `py` of the
+    fixture's own comes ahead of any real one and fails, so the search goes on, to
+    the placeholders, and after them to `python3.14` down to `python3.10`, of which
+    `python3.12` is the one the sealed PATH can answer. It forwards to the
+    interpreter the way claude.cmd above forwards to its recorder.
+    """
+    _write(box["bin"] / "py.cmd", "@ECHO off\nEXIT /B 1\n")
+    _write(box["bin"] / "python3.12.cmd", f'@ECHO off\n"{sys.executable}" %*\n')
 
 
 def test_the_store_placeholder_is_not_mistaken_for_python(box, tmp_path):
     """A WindowsApps python.exe exists, resolves, and never runs Python.
 
-    The placeholders here stand in front of `python` and `python3`, so the way to
-    a real interpreter is the `py` launcher. This test brings its own
-    (`_launcher_stand_in`), and does not rely on the machine having one in a
-    directory the sealed PATH keeps."""
+    Here `python` and `python3` are those placeholders. The installer has to go
+    past them to the interpreter behind them, and without launching either: it
+    skips a path under WindowsApps. A placeholder that was launched would only
+    print its nag and exit 9009, the version probe would reject it, and the install
+    would finish all the same, so what tells a skipped placeholder from a launched
+    one is the line each writes to a log when it is launched. That log stays empty."""
+    launched = tmp_path / "store-stub-launches.log"
+    launched.touch()
     fake_store = tmp_path / "WindowsApps"
     fake_store.mkdir()
-    # A stub that behaves like the real one: prints its nag line, exits 9009.
-    _write(
-        fake_store / "python.cmd",
-        "@ECHO off\r\nECHO Python was not found; run without arguments to install"
-        " from the Microsoft Store\r\nEXIT /B 9009\r\n",
-    )
-    shutil.copy(fake_store / "python.cmd", fake_store / "python3.cmd")
-    _launcher_stand_in(box)
+    _store_stub(fake_store / "python.cmd", launched)
+    _store_stub(fake_store / "python3.cmd", launched)
+    _interpreter_past_the_stubs(box)
 
     proc, calls = _run(box, PATH=_sealed_path(box, fake_store))
 
-    # It must find the real interpreter behind the placeholder, not stop at it.
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "mcp\tadd" in calls
-    assert "WindowsApps" not in _add_line(calls)
+    assert launched.read_text(errors="replace") == "", "a Store placeholder was launched"
+
+
+def test_a_store_stub_writes_its_log_and_exits_9009_when_it_is_launched(tmp_path):
+    """Control for the test above, which passes only while its log stays empty: a
+    stub that is launched writes to it, and exits 9009 as the placeholder does, so
+    an empty log means the stubs were not launched and not that they cannot write
+    one."""
+    launched = tmp_path / "store-stub-launches.log"
+    launched.touch()
+    stub = tmp_path / "WindowsApps" / "python.cmd"
+    stub.parent.mkdir()
+    _store_stub(stub, launched)
+
+    proc = subprocess.run(
+        [os.environ.get("COMSPEC") or "cmd.exe", "/c", str(stub)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+    )
+
+    assert proc.returncode == 9009, (proc.returncode, proc.stdout, proc.stderr)
+    assert launched.read_text(errors="replace").split() == ["python.cmd", "was", "launched"]
 
 
 def test_a_placeholder_named_outright_is_rejected_not_used(box, tmp_path):
