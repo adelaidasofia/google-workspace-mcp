@@ -141,6 +141,13 @@ def box(tmp_path):
     venv_bin = repo / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
     _exe(venv_bin / "python", "#!/bin/sh\nexit 0\n")
+    # install.sh needs a python3 of 3.10 or newer from PATH, and this fixture only
+    # puts its own dir in front of the machine's real PATH. Left alone, the
+    # interpreter is whichever python3 the host has first -- on a stock Mac the
+    # system 3.9 -- and the tests that must succeed fail while the ones that must
+    # fail pass without reaching the check they are about. So python3 is pinned to
+    # the interpreter running the tests, which is one this repo supports (3.11+).
+    _exe(bindir / "python3", f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
 
     return {"repo": repo, "bin": bindir, "log": log, "root": tmp_path}
 
@@ -192,17 +199,21 @@ def test_valid_credentials_register_the_expected_command(box):
 
 
 @pytest.mark.parametrize(
-    "creds, why",
+    "creds, why, said",
     [
-        ({"GWS_CLIENT_ID": ID, "GWS_CLIENT_SECRET": ID}, "same value in both fields"),
-        ({"GWS_CLIENT_ID": ID}, "secret missing"),
-        ({"GWS_CLIENT_SECRET": SECRET}, "id missing"),
+        ({"GWS_CLIENT_ID": ID, "GWS_CLIENT_SECRET": ID}, "same value in both fields", "identical"),
+        ({"GWS_CLIENT_ID": ID}, "secret missing", "Only one of"),
+        ({"GWS_CLIENT_SECRET": SECRET}, "id missing", "Only one of"),
     ],
 )
-def test_bad_credentials_register_nothing(box, creds, why):
+def test_bad_credentials_register_nothing(box, creds, why, said):
     proc, calls = _run(box, **creds)
     assert proc.returncode != 0, f"{why}: should have failed loudly"
     assert "mcp add" not in calls, f"{why}: must not register an unusable client"
+    # It has to fail at the credential check. A run that dies earlier, on the
+    # interpreter or a missing tool, also exits non-zero with nothing registered,
+    # and would pass without having tested any of this.
+    assert said in proc.stderr, proc.stderr
 
 
 def test_rerunning_heals_instead_of_failing(box):
@@ -853,6 +864,21 @@ def test_the_guard_fails_when_the_config_would_not_be_a_throwaway(tmp_path, key)
 
     with pytest.raises(AssertionError, match=key):
         _assert_nothing_real_is_reachable(env, root, shim_expected=False)
+
+
+def test_box_pins_python3_so_the_host_cannot_decide_the_outcome(box):
+    """`box` keeps the machine's real PATH behind its own dir. install.sh needs a
+    python3 of 3.10 or newer from that PATH, so without a pin the interpreter
+    these tests run against is whichever python3 the host has first: on a stock
+    Mac the system 3.9, which fails the tests that must succeed and passes the
+    ones that must fail without ever reaching the check they are about."""
+    found = _command_found_on(_box_env(box), "python3")
+
+    assert found, "no python3 on the box PATH at all"
+    assert Path(found).resolve().is_relative_to(box["root"].resolve()), (
+        f"the box PATH finds the host's python3 ({found}), so what these tests "
+        f"prove depends on which Python the machine running them has"
+    )
 
 
 def test_the_guard_fails_when_claude_code_execpath_points_outside_the_tmp_dir(tmp_path):
