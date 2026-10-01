@@ -775,6 +775,10 @@ def test_an_execpath_that_is_not_claude_code_is_rejected(bare_box, tmp_path):
         ("2.1.281 (Claude Code) is not installed here", "stdout", 0),
         # More than a version in front of the suffix is not a version.
         ("claude-code 2.1.281 (Claude Code)", "stdout", 0),
+        # These start with a digit and end with the suffix, as a banner does, so
+        # the rule that a version has no spaces in it is all that keeps them out.
+        ("3 warnings from 2.1.281 (Claude Code)", "stdout", 0),
+        ("12 | 2.1.281 (Claude Code)", "stdout", 0),
         # The banner is looked for on every line, so a line that is not the banner
         # does not become one because other lines come with it.
         ("see the docs\nClaude Code is not installed on this machine", "stderr", 127),
