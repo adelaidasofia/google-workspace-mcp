@@ -48,7 +48,6 @@ def test_no_over_broad_gmail_scope():
 # SCOPES fails later as "invalid_scope" on a user's machine, and Google's box
 # rejects the shortened ".../auth/x" form the scope picker displays.
 DOCS_WITH_SCOPE_LISTS = ["SETUP.md", "GUIDED-SETUP.md"]
-SHORTENED_SCOPE_LINE = re.compile(r"^\s*(?:[-*]\s*)?`?\.\.\./auth/\S+`?\s*$")
 
 
 def _listed_scopes(text: str) -> set[str]:
@@ -63,4 +62,13 @@ def _listed_scopes(text: str) -> set[str]:
 def test_setup_docs_list_exactly_the_requested_scopes(doc):
     text = (ROOT / doc).read_text(encoding="utf-8")
     assert _listed_scopes(text) == set(accounts.SCOPES)
-    assert not [line for line in text.splitlines() if SHORTENED_SCOPE_LINE.match(line)]
+
+
+@pytest.mark.parametrize("doc", DOCS_WITH_SCOPE_LISTS)
+def test_setup_docs_never_show_the_shortened_scope_form(doc):
+    text = (ROOT / doc).read_text(encoding="utf-8")
+    # Anywhere in the text, not only on a line of its own: a bullet, a table
+    # cell or a numbered item that shows ".../auth/gmail.modify" is still
+    # something a reader will paste. A prose mention of ".../auth/..." has no
+    # letter after the slash, so it does not match.
+    assert not re.search(r"\.\.\./auth/[A-Za-z]", text)
