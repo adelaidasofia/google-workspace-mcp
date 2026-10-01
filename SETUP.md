@@ -276,8 +276,8 @@ Done — go to [§7](#7-set-a-default-account-optional) and [§8](#8-verify) abo
 
 One person creates the app once, then everyone else uses shared-client mode above:
 
-1. Do §1–§4 above (create project, enable APIs, consent screen, Desktop client).
-2. For a small, fixed group, **Testing** mode works: in §3 step 2 (**Audience → Test users**), add every member's email (up to 100). Members who are not listed get "Access blocked".
+1. Do §1–§4 above (create project, enable APIs, consent screen, Desktop client). At §3 step 2, publish the app, or take its allowlist option if you want Testing (next point).
+2. For a small, fixed group, **Testing** mode works: keep the app in Testing and add every member's email under **Audience → Test users** (§3 step 2's allowlist option), up to 100. Test users apply only while the app is in Testing. Members who are not listed get "Access blocked".
 3. For an open or growing group (a public repo, a cohort with late signups, strangers you don't want to track by email), skip the test-user list — **publish the app** instead (Google Auth Platform → Audience → **Publish app**). Any Google account can then authorize with no roster to maintain and no 100-user cap on who's authorized (Google does cap unverified apps around 100 *total* grantees — verify if you expect to exceed that). The one-time "Google hasn't verified this app" click-through is unchanged either way.
 4. Distribute the credential file (see §4/§5 — Google removed client-secret download; you may need to reconstruct the JSON) to members over a private channel, and send the **Client ID** alongside it — corporate members forward that Client ID to their IT to mark *Trusted*. IT-Trust matters independent of Testing vs. production: it's what gets your app past a locked-down org's third-party-app policy, not what removes the unverified warning.
 
