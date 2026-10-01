@@ -66,7 +66,7 @@ GWS_CLIENT_ID='<client id>' GWS_CLIENT_SECRET='<client secret>' bash ~/google-wo
 
 With both values set the installer asks no questions: it builds its own environment, installs dependencies and registers the connector with Claude Code. The Client ID ends in `.apps.googleusercontent.com`; the secret usually starts with `GOCSPX-`.
 
-If it stops with "Claude Code is not installed" when Claude Code is running inside the Claude desktop app, the fix is to put the app's own copy of Claude Code on `PATH` and run it again:
+Inside the Claude desktop app the installer finds the app's own copy of Claude Code by itself. If it still stops, with a message that names `CLAUDE_CODE_EXECPATH`, it could not confirm that copy. Put the app's own copy of Claude Code on `PATH` and run it again; the installer uses a `claude` on `PATH` without that check:
 
 ```bash
 PATH="$(dirname "$CLAUDE_CODE_EXECPATH"):$PATH" GWS_CLIENT_ID='<client id>' GWS_CLIENT_SECRET='<client secret>' bash ~/google-workspace-mcp/install.sh
