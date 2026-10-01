@@ -555,10 +555,18 @@ def _assert_the_app_copy_was_refused(proc, execpath) -> None:
     """The app's copy of Claude Code was found and could not be used. That is
     different news from Claude Code being absent, and the message must not tell
     the person it is not installed: it has to name the variable and the path
-    that was refused, so they can see what to fix."""
+    that was refused, so they can see what to fix, and then say what to do next.
+
+    What to do next is not to run `claude --version` in Terminal, which for the
+    people this is for prints "command not found". And the message promises no
+    time: the ten second bound is perl's, and without perl there is none."""
     assert "not installed" not in proc.stderr, proc.stderr
     assert "CLAUDE_CODE_EXECPATH" in proc.stderr, proc.stderr
     assert str(execpath) in proc.stderr, proc.stderr
+    assert "claude --version" not in proc.stderr, proc.stderr
+    assert "ten seconds" not in proc.stderr, proc.stderr
+    assert "put the app's own copy of Claude Code" in proc.stderr, proc.stderr
+    assert "run this script again" in proc.stderr, proc.stderr
 
 
 def _hint_words(stderr: str) -> list:

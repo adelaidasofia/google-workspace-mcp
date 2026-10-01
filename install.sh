@@ -230,14 +230,19 @@ elif [ -n "${CLAUDE_CODE_EXECPATH:-}" ] && [ -f "$CLAUDE_CODE_EXECPATH" ] \
   ok "using the copy of Claude Code that the Claude desktop app runs"
 elif [ -n "${CLAUDE_CODE_EXECPATH:-}" ]; then
   # It was set and was not usable: missing, not executable, a different program,
-  # or silent for ten seconds. Saying Claude Code is not installed would be wrong
-  # news about a copy that may be sitting right there, so say what was refused.
+  # or silent past the ten second bound (which only exists where there is perl).
+  # Saying Claude Code is not installed would be wrong news about a copy that may
+  # be sitting right there, so say what was refused. Two things the message keeps
+  # out: a time limit, since without perl there is none, and a `claude --version`
+  # check in Terminal, which for the people this is for only prints "command not
+  # found".
   die \
 "Claude Code is not on your PATH, and CLAUDE_CODE_EXECPATH is set to something that could not be used instead:
      $CLAUDE_CODE_EXECPATH
    It has to be an executable file that answers  --version  with a line like
-   \"2.1.281 (Claude Code)\"  within ten seconds.
-   Open Terminal, check that  claude --version  works there, then run this script again from that Terminal."
+   \"2.1.281 (Claude Code)\".
+   In the Claude desktop app: put the app's own copy of Claude Code on PATH, then run this script again.
+   Anywhere else: install Claude Code first, quit and reopen Terminal, then run this script again."
 else
   die \
 "Claude Code is not installed, or its 'claude' command is not on your PATH.
