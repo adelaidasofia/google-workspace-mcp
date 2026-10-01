@@ -216,6 +216,16 @@ elif [ -n "${CLAUDE_CODE_EXECPATH:-}" ] && [ -f "$CLAUDE_CODE_EXECPATH" ] \
      && [ -x "$CLAUDE_CODE_EXECPATH" ] && is_claude_code "$CLAUDE_CODE_EXECPATH"; then
   CLAUDE_BIN="$CLAUDE_CODE_EXECPATH"
   ok "using the copy of Claude Code that the Claude desktop app runs"
+elif [ -n "${CLAUDE_CODE_EXECPATH:-}" ]; then
+  # It was set and was not usable: missing, not executable, a different program,
+  # or silent for ten seconds. Saying Claude Code is not installed would be wrong
+  # news about a copy that may be sitting right there, so say what was refused.
+  die \
+"Claude Code is not on your PATH, and CLAUDE_CODE_EXECPATH is set to something that could not be used instead:
+     $CLAUDE_CODE_EXECPATH
+   It has to be an executable file that answers  --version  with a line like
+   \"2.1.281 (Claude Code)\"  within ten seconds.
+   Open Terminal, check that  claude --version  works there, then run this script again from that Terminal."
 else
   die \
 "Claude Code is not installed, or its 'claude' command is not on your PATH.

@@ -551,6 +551,16 @@ def _probe_leftovers(fx) -> list:
     return sorted(p.name for p in (fx["root"] / "tmp").glob("claude-probe.*"))
 
 
+def _assert_the_app_copy_was_refused(proc, execpath) -> None:
+    """The app's copy of Claude Code was found and could not be used. That is
+    different news from Claude Code being absent, and the message must not tell
+    the person it is not installed: it has to name the variable and the path
+    that was refused, so they can see what to fix."""
+    assert "not installed" not in proc.stderr, proc.stderr
+    assert "CLAUDE_CODE_EXECPATH" in proc.stderr, proc.stderr
+    assert str(execpath) in proc.stderr, proc.stderr
+
+
 def _hint_words(stderr: str) -> list:
     """The words a real shell reads from the line the installer prints for
     seeing why `mcp add` failed.
@@ -616,13 +626,31 @@ def test_execpath_is_used_when_claude_is_not_on_path(bare_box, tmp_path):
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not found")
-def test_neither_path_nor_execpath_fails_with_the_not_installed_message(bare_box):
-    """Negative control: nothing at all resolves to Claude Code."""
-    proc, calls = _run_bare(bare_box)
+@pytest.mark.parametrize("env", [{}, {"CLAUDE_CODE_EXECPATH": ""}], ids=["unset", "empty"])
+def test_neither_path_nor_execpath_fails_with_the_not_installed_message(bare_box, env):
+    """Negative control: nothing at all resolves to Claude Code. An empty
+    CLAUDE_CODE_EXECPATH is no more a refused copy than an unset one."""
+    proc, calls = _run_bare(bare_box, **env)
 
     assert proc.returncode != 0
     assert "mcp add" not in calls
     assert "Claude Code is not installed" in proc.stderr, proc.stderr
+
+
+@pytest.mark.parametrize("kind", ["missing", "not-executable"])
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_an_execpath_that_cannot_be_run_is_named_in_the_message(bare_box, tmp_path, kind):
+    """A stale CLAUDE_CODE_EXECPATH, or one that points at a file that is not
+    executable, is refused without being run, and the message says which."""
+    execpath = tmp_path / "claude-gone"
+    if kind == "not-executable":
+        execpath.write_text("#!/bin/sh\nexit 0\n")
+
+    proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
+
+    assert proc.returncode != 0
+    assert "mcp add" not in calls
+    _assert_the_app_copy_was_refused(proc, execpath)
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not found")
@@ -637,7 +665,7 @@ def test_an_execpath_that_is_not_claude_code_is_rejected(bare_box, tmp_path):
 
     assert proc.returncode != 0
     assert "mcp add" not in calls
-    assert "Claude Code is not installed" in proc.stderr, proc.stderr
+    _assert_the_app_copy_was_refused(proc, other)
 
 
 @pytest.mark.parametrize(
@@ -664,7 +692,7 @@ def test_an_execpath_that_only_mentions_claude_code_is_rejected(bare_box, tmp_pa
 
     assert proc.returncode != 0, proc.stdout + proc.stderr
     assert "mcp add" not in calls
-    assert "Claude Code is not installed" in proc.stderr, proc.stderr
+    _assert_the_app_copy_was_refused(proc, execpath)
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not found")
@@ -740,7 +768,7 @@ def test_an_execpath_that_hangs_on_version_is_given_up_on(bare_box, tmp_path):
     )
     assert proc.returncode != 0
     assert "mcp add" not in calls
-    assert "Claude Code is not installed" in proc.stderr, proc.stderr
+    _assert_the_app_copy_was_refused(proc, execpath)
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not found")
@@ -783,7 +811,7 @@ def test_a_wrapper_whose_child_outlives_the_bound_is_still_cut_off_on_time(bare_
     )
     assert proc.returncode != 0
     assert "mcp add" not in calls
-    assert "Claude Code is not installed" in proc.stderr, proc.stderr
+    _assert_the_app_copy_was_refused(proc, execpath)
     assert _probe_leftovers(bare_box) == []
 
 
