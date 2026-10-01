@@ -1,7 +1,10 @@
 """install.sh is the path every new install takes, so it needs a gate.
 
 Hermetic: `claude` and the venv interpreter are shims on PATH, so nothing here
-touches the real Claude Code config or the network.
+touches the real Claude Code config or the network. That is enforced, not hoped
+for: every installer run gets a throwaway HOME and CLAUDE_CONFIG_DIR, and
+refuses to start if a real `claude` could be reached from the PATH it was given
+(see "The harness itself" at the bottom).
 
 Three things are worth pinning, and nothing else:
   1. valid input produces the exact `claude mcp add` argv (a lost `--` or a
@@ -17,12 +20,14 @@ import os
 import shutil
 import stat
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INSTALL_SH = REPO_ROOT / "install.sh"
+BASH = shutil.which("bash")
 
 ID = "1234567890-abc.apps.googleusercontent.com"
 SECRET = "GOCSPX-averyrealisticlookingsecret"
@@ -41,6 +46,63 @@ pytestmark = [
 def _exe(path: Path, body: str) -> None:
     path.write_text(body)
     path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+
+# ---------------------------------------------------------------------------
+# Keeping the installer away from the developer's real Claude Code
+#
+# install.sh ends by running `claude mcp add ... -s user`. If a real `claude` is
+# the one that answers, that writes a connector into the developer's own
+# ~/.claude.json, pointing at a pytest temp directory that is gone by the next
+# run, and every Claude Code session on the machine then shows it as failing. A
+# fixture that forgets to put its own fake `claude` first is all it takes.
+#
+# So two layers, neither of which depends on a fixture remembering anything:
+#   * every run gets a HOME and CLAUDE_CONFIG_DIR inside its own tmp dir, so
+#     even a real `claude` reached by mistake could only write a throwaway
+#     config;
+#   * every run first checks that `claude` cannot resolve to anything outside
+#     its tmp dir, and refuses to start if it can.
+# ---------------------------------------------------------------------------
+
+
+def _throwaway_config(root: Path) -> dict:
+    """HOME and CLAUDE_CONFIG_DIR for one installer run, both inside `root`."""
+    home = root / "home"
+    config = root / "claude-config"
+    home.mkdir(exist_ok=True)
+    config.mkdir(exist_ok=True)
+    return {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(config)}
+
+
+def _command_found_on(env: dict, name: str) -> str:
+    """Where `command -v <name>` lands under `env`: the lookup install.sh makes."""
+    probe = subprocess.run(
+        [BASH or "bash", "-c", 'command -v "$1"', "bash", name],
+        capture_output=True, text=True, env=env, timeout=30,
+    )
+    return probe.stdout.strip() if probe.returncode == 0 else ""
+
+
+def _assert_nothing_real_is_reachable(env: dict, root: Path, *, shim_expected: bool) -> None:
+    """Refuse to run the installer unless it can only touch things inside `root`.
+
+    `claude` must resolve to nothing at all (`shim_expected=False`: the tests that
+    need `claude` to be absent from PATH also depend on this), or to a shim inside
+    `root`. HOME and CLAUDE_CONFIG_DIR must point inside `root` as well.
+    """
+    root = root.resolve()
+    found = _command_found_on(env, "claude")
+    if found:
+        assert shim_expected, f"expected no claude on this PATH, but it resolves to {found}"
+        assert Path(found).resolve().is_relative_to(root), (
+            f"a real claude is reachable on the fixture PATH: {found}. install.sh would "
+            f"run `claude mcp add ... -s user` against it for real. PATH={env.get('PATH')}"
+        )
+    for key in ("HOME", "CLAUDE_CONFIG_DIR"):
+        assert Path(env[key]).resolve().is_relative_to(root), (
+            f"{key} must point inside this test's own tmp dir, got {env[key]!r}"
+        )
 
 
 @pytest.fixture
@@ -66,17 +128,24 @@ def box(tmp_path):
     venv_bin.mkdir(parents=True)
     _exe(venv_bin / "python", "#!/bin/sh\nexit 0\n")
 
-    return {"repo": repo, "bin": bindir, "log": log}
+    return {"repo": repo, "bin": bindir, "log": log, "root": tmp_path}
 
 
-def _run(box, **creds):
+def _box_env(box, **creds):
     env = dict(os.environ, PATH=f"{box['bin']}{os.pathsep}{os.environ['PATH']}", NO_COLOR="1")
     # Popped so the host's own values -- this suite may itself be running
     # inside a Claude Code session with CLAUDE_CODE_EXECPATH exported -- can
     # never leak into a test that means to control it explicitly.
     for key in ("GWS_CLIENT_ID", "GWS_CLIENT_SECRET", "CLAUDE_CODE_EXECPATH"):
         env.pop(key, None)
+    env.update(_throwaway_config(box["root"]))
     env.update(creds)
+    return env
+
+
+def _run(box, **creds):
+    env = _box_env(box, **creds)
+    _assert_nothing_real_is_reachable(env, box["root"], shim_expected=True)
     proc = subprocess.run(
         ["bash", str(box["repo"] / "install.sh")],
         capture_output=True, text=True, env=env, input="", timeout=120,
@@ -138,7 +207,6 @@ def test_rerunning_heals_instead_of_failing(box):
 # ---------------------------------------------------------------------------
 
 BASE_TOOLS = ("sed", "cat", "rm", "dirname")
-BASH = shutil.which("bash")
 
 
 def _py_shim(path: Path, version: str) -> None:
@@ -186,13 +254,20 @@ def sealed(tmp_path):
     _exe(bindir / "claude", f'#!/bin/sh\necho "$*" >> "{log}"\ncase "$2" in remove) exit 1 ;; esac\nexit 0\n')
     _exe(bindir / "git", "#!/bin/sh\nexit 0\n")
 
-    return {"repo": repo, "bin": bindir, "log": log}
+    return {"repo": repo, "bin": bindir, "log": log, "root": tmp_path}
+
+
+def _sealed_env(fx, **extra):
+    """PATH is the fixture's bindir and nothing else, so what resolves is decided here."""
+    env = {"PATH": str(fx["bin"]), "NO_COLOR": "1", **_throwaway_config(fx["root"])}
+    env.update({"GWS_CLIENT_ID": ID, "GWS_CLIENT_SECRET": SECRET})
+    env.update(extra)
+    return env
 
 
 def _run_sealed(sealed, **extra):
-    env = {"PATH": str(sealed["bin"]), "NO_COLOR": "1", "HOME": str(sealed["repo"])}
-    env.update({"GWS_CLIENT_ID": ID, "GWS_CLIENT_SECRET": SECRET})
-    env.update(extra)
+    env = _sealed_env(sealed, **extra)
+    _assert_nothing_real_is_reachable(env, sealed["root"], shim_expected=True)
     proc = subprocess.run(
         [BASH, str(sealed["repo"] / "install.sh")],
         capture_output=True, text=True, env=env, input="", timeout=120,
@@ -309,7 +384,10 @@ def test_a_broken_override_fails_instead_of_searching_past_it(sealed):
 # finds nothing.
 # ---------------------------------------------------------------------------
 
-EXECPATH_TOOLS = BASE_TOOLS + ("grep",)
+# perl is what bounds the --version probe to ten seconds. It is a tool on the
+# sealed PATH like the others, so a test can take it away and see what the
+# installer does without it.
+EXECPATH_TOOLS = BASE_TOOLS + ("perl",)
 
 
 @pytest.fixture
@@ -341,13 +419,12 @@ def bare_box(tmp_path):
     log = tmp_path / "calls.log"
     log.touch()
 
-    return {"repo": repo, "bin": bindir, "log": log}
+    return {"repo": repo, "bin": bindir, "log": log, "root": tmp_path}
 
 
 def _run_bare(bare_box, **extra):
-    env = {"PATH": str(bare_box["bin"]), "NO_COLOR": "1", "HOME": str(bare_box["repo"])}
-    env.update({"GWS_CLIENT_ID": ID, "GWS_CLIENT_SECRET": SECRET})
-    env.update(extra)
+    env = _sealed_env(bare_box, **extra)
+    _assert_nothing_real_is_reachable(env, bare_box["root"], shim_expected=False)
     proc = subprocess.run(
         [BASH, str(bare_box["repo"] / "install.sh")],
         capture_output=True, text=True, env=env, input="", timeout=120,
@@ -355,23 +432,52 @@ def _run_bare(bare_box, **extra):
     return proc, bare_box["log"].read_text()
 
 
-def _recording_claude(path: Path, log: Path, version_line: str) -> None:
+def _recording_claude(
+    path: Path,
+    log: Path,
+    version_line: str,
+    *,
+    version_exit: int = 0,
+    version_on: str = "stdout",
+    add_exit: int = 0,
+) -> None:
     """A shim that answers --version on its own, and otherwise behaves like
     the `claude` shim in `box` / `sealed`: records its argv, and heals on
     `mcp remove` of something not yet registered by exiting 1.
+
+    `version_exit` and `version_on` shape how it answers --version (which stream
+    it prints on, and what it exits with afterwards); `add_exit` is what
+    `mcp add` exits with.
     """
+    to_stderr = " >&2" if version_on == "stderr" else ""
     _exe(
         path,
         f"""#!/bin/sh
 if [ "$1" = "--version" ]; then
-  echo "{version_line}"
-  exit 0
+  echo "{version_line}"{to_stderr}
+  exit {version_exit}
 fi
 echo "$*" >> "{log}"
-case "$2" in remove) exit 1 ;; esac
+case "$2" in
+  remove) exit 1 ;;
+  add) exit {add_exit} ;;
+esac
 exit 0
 """,
     )
+
+
+HANG_SECONDS = 60
+
+
+def _hanging_claude(path: Path) -> None:
+    """A binary that never answers --version (it sleeps for HANG_SECONDS).
+
+    `exec`, so the process the installer's ten-second alarm kills is the sleeper
+    itself, not a shell that leaves a sleeping child holding the output pipe.
+    """
+    sleeper = shutil.which("sleep")
+    _exe(path, f'#!/bin/sh\nexec "{sleeper}" {HANG_SECONDS}\n')
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not found")
@@ -403,6 +509,10 @@ def test_execpath_is_used_when_claude_is_not_on_path(bare_box, tmp_path):
     assert "mcp add google-workspace -s user" in argv
     assert f"-e GWS_CLIENT_ID={ID}" in argv
     assert f"-e GWS_CLIENT_SECRET={SECRET}" in argv
+    assert " -- " in argv, "without `--` the interpreter path parses as a flag"
+    assert argv.rstrip().endswith("server.py")
+    # The heal-by-remove step goes through the same binary as the add.
+    assert "mcp remove google-workspace -s user" in calls
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not found")
@@ -427,6 +537,106 @@ def test_an_execpath_that_is_not_claude_code_is_rejected(bare_box, tmp_path):
 
     assert proc.returncode != 0
     assert "mcp add" not in calls
+    assert "Claude Code is not installed" in proc.stderr, proc.stderr
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_an_execpath_that_prints_its_banner_and_then_exits_non_zero_is_still_used(bare_box, tmp_path):
+    """What a binary says it is and how it exits are separate questions. The
+    installer runs under `pipefail`, where a non-zero exit from the thing being
+    asked would fail a whole `... | grep` pipeline and throw out a binary that
+    had just said "Claude Code"."""
+    execpath = tmp_path / "claude-exits-7"
+    _recording_claude(execpath, bare_box["log"], "2.1.281 (Claude Code)", version_exit=7)
+
+    proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "mcp add google-workspace" in calls
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_an_execpath_that_says_what_it_is_on_stderr_is_still_used(bare_box, tmp_path):
+    """Some CLIs print their version banner on stderr. Reading only stdout would
+    reject a real Claude Code for it."""
+    execpath = tmp_path / "claude-says-it-on-stderr"
+    _recording_claude(execpath, bare_box["log"], "2.1.281 (Claude Code)", version_on="stderr")
+
+    proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "mcp add google-workspace" in calls
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_an_execpath_that_hangs_on_version_is_given_up_on(bare_box, tmp_path):
+    """A binary that never answers --version must not hang the installer. It is
+    cut off after ten seconds and counts as not being Claude Code.
+
+    The binary here hangs for HANG_SECONDS, long enough that an installer with
+    no bound finishes much later than one with it; the elapsed-time check is
+    what tells the two apart, because a hang that eventually ends and prints
+    nothing is rejected either way."""
+    execpath = tmp_path / "claude-hangs"
+    _hanging_claude(execpath)
+
+    started = time.monotonic()
+    proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
+    elapsed = time.monotonic() - started
+
+    assert elapsed < HANG_SECONDS - 20, (
+        f"the --version probe was not bounded: the installer took {elapsed:.0f}s "
+        f"against a binary that hangs for {HANG_SECONDS}s"
+    )
+    assert proc.returncode != 0
+    assert "mcp add" not in calls
+    assert "Claude Code is not installed" in proc.stderr, proc.stderr
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_an_execpath_is_still_used_where_perl_is_missing(bare_box, tmp_path):
+    """The ten-second bound needs perl. Without it the question is asked
+    unbounded rather than not asked: no perl must never mean no fallback."""
+    (bare_box["bin"] / "perl").unlink()
+    execpath = tmp_path / "claude"
+    _recording_claude(execpath, bare_box["log"], "2.1.281 (Claude Code)")
+    # Control: this PATH really has no perl, so the unbounded branch is the one that runs.
+    assert _command_found_on(_sealed_env(bare_box), "perl") == ""
+
+    proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "mcp add google-workspace" in calls
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_a_failed_registration_names_the_binary_that_was_run(bare_box, tmp_path):
+    """The hint for seeing the error has to be a command that works for the
+    person reading it. The desktop app's copy of Claude Code is not on PATH, so
+    a bare `claude` would not be; its path has a space in it, so it is quoted."""
+    execdir = tmp_path / "Application Support" / "Claude"
+    execdir.mkdir(parents=True)
+    execpath = execdir / "claude"
+    _recording_claude(execpath, bare_box["log"], "2.1.281 (Claude Code)", add_exit=1)
+
+    proc, _ = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
+
+    assert proc.returncode != 0
+    assert "Could not register the connector" in proc.stderr, proc.stderr
+    assert f'"{execpath}" mcp add google-workspace' in proc.stderr, proc.stderr
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_a_failed_registration_through_claude_on_path_still_says_claude(sealed):
+    """Nothing changes for the common case: with `claude` on PATH the hint is
+    the plain `claude mcp add ...` it always was."""
+    _py_shim(sealed["bin"] / "python3", "3.12")
+    _exe(sealed["bin"] / "claude", '#!/bin/sh\ncase "$2" in add) exit 1 ;; esac\nexit 0\n')
+
+    proc, _ = _run_sealed(sealed)
+
+    assert proc.returncode != 0
+    assert "     claude mcp add google-workspace" in proc.stderr, proc.stderr
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not found")
@@ -447,3 +657,79 @@ def test_path_wins_over_execpath(sealed, tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "mcp add google-workspace" in calls
     assert execpath_log.read_text() == "", "the execpath shim must not have been invoked"
+
+
+# ---------------------------------------------------------------------------
+# The harness itself
+#
+# The guard that keeps the installer away from a real Claude Code is only worth
+# having if it can fail. These show that every PATH the fixtures build passes it,
+# that it fails on the two things it exists to catch, and that the `claude` the
+# installer launches really does receive the throwaway config.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "fixture_name, env_of, shim_expected",
+    [
+        ("box", _box_env, True),
+        ("sealed", _sealed_env, True),
+        ("bare_box", _sealed_env, False),
+    ],
+)
+def test_no_fixture_can_reach_a_real_claude(request, fixture_name, env_of, shim_expected):
+    """Every PATH a fixture builds resolves `claude` to its own shim, or to
+    nothing: never to whatever the host happens to have installed."""
+    fx = request.getfixturevalue(fixture_name)
+
+    _assert_nothing_real_is_reachable(env_of(fx), fx["root"], shim_expected=shim_expected)
+
+
+def test_the_guard_fails_when_a_real_claude_is_reachable(tmp_path):
+    """Negative control. On a machine with no `claude` at all (CI) every test
+    above passes with the guard deleted, so the guard has to be shown failing."""
+    root = tmp_path / "fixture"
+    root.mkdir()
+    host = tmp_path / "host-install"  # stands in for wherever a real claude lives
+    host.mkdir()
+    _exe(host / "claude", "#!/bin/sh\nexit 0\n")
+    env = {"PATH": str(host), "NO_COLOR": "1", **_throwaway_config(root)}
+
+    with pytest.raises(AssertionError, match="real claude is reachable"):
+        _assert_nothing_real_is_reachable(env, root, shim_expected=True)
+    with pytest.raises(AssertionError, match="expected no claude"):
+        _assert_nothing_real_is_reachable(env, root, shim_expected=False)
+
+
+@pytest.mark.parametrize("key", ["HOME", "CLAUDE_CONFIG_DIR"])
+def test_the_guard_fails_when_the_config_would_not_be_a_throwaway(tmp_path, key):
+    """Negative control for the other layer: a HOME or CLAUDE_CONFIG_DIR that
+    points outside the test's own tmp dir is refused."""
+    root = tmp_path / "fixture"
+    root.mkdir()
+    elsewhere = tmp_path / "somewhere-else"
+    elsewhere.mkdir()
+    env = {"PATH": str(root / "empty"), "NO_COLOR": "1", **_throwaway_config(root), key: str(elsewhere)}
+
+    with pytest.raises(AssertionError, match=key):
+        _assert_nothing_real_is_reachable(env, root, shim_expected=False)
+
+
+def test_the_claude_the_installer_runs_only_sees_a_throwaway_config(box):
+    """What matters is not what the harness hands the installer but what the
+    `claude` the installer launches actually receives."""
+    seen = box["root"] / "seen-by-claude.log"
+    _exe(
+        box["bin"] / "claude",
+        f'#!/bin/sh\necho "$HOME|$CLAUDE_CONFIG_DIR" >> "{seen}"\nexit 0\n',
+    )
+
+    proc, _ = _run(box, GWS_CLIENT_ID=ID, GWS_CLIENT_SECRET=SECRET)
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    runs = [ln.split("|") for ln in seen.read_text().splitlines()]
+    assert len(runs) == 2, f"expected the remove and the add, got {runs!r}"
+    root = box["root"].resolve()
+    for home, config in runs:
+        assert Path(home).resolve().is_relative_to(root), home
+        assert Path(config).resolve().is_relative_to(root), config
