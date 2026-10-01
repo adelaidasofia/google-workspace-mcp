@@ -37,7 +37,7 @@ Google moved the consent screen into **Google Auth Platform**, which has separat
 1. **Get started** (shown the first time only): App name `Google Workspace MCP`, user support email = yours, Audience **External** (Internal needs a Google Workspace or Cloud Identity organization), contact email = yours, agree to the policy, **Create**.
 2. **Audience** → **Publish app** and confirm, so the publishing status reads **In production**. In **Testing**, Google expires refresh tokens for external users 7 days after they are issued, which means re-running `gws_account_add` every week. Publishing needs no verification: any Google account can authorize after a one-time "Google hasn't verified this app" click-through. Verification only removes that warning and the cap of about 100 total users on unverified apps. Reversible with **Back to testing**. Once published, anyone who has your Client ID and secret can open a sign-in screen for your app, so keep both private.
    - Want a fixed allowlist instead? Stay in Testing and add every email you plan to authorize under **Audience → Test users**. Anyone not listed gets "Access blocked", and tokens still expire weekly.
-3. **Data Access** → **Add or remove scopes**. In the box for adding scopes manually, paste these nine lines (the full URLs, not the shortened `.../auth/...` form the picker displays), then **Add to table**, **Update** and **Save**:
+3. **Data Access** → **Add or remove scopes**. In the box for adding scopes manually, paste these lines (the full URLs, not the shortened `.../auth/...` form the picker displays), then **Add to table**, **Update** and **Save**:
 
    ```text
    https://www.googleapis.com/auth/gmail.modify
