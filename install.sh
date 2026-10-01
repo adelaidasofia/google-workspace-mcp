@@ -170,6 +170,15 @@ run_bounded() {
   fi
 }
 
+# The temporary file the probe below writes the binary's answer to. An interrupt
+# while the probe waits on a binary that is not answering (Ctrl-C, the window
+# closing, a TERM) would otherwise leave it in TMPDIR, or in /tmp. A trap runs
+# after the function's locals are gone, so the name is a global, and an EXIT trap
+# removes whatever it names. The probe removes the file itself as soon as it has
+# read it, and then forgets the name.
+PROBE_OUT=""
+trap '[ -z "$PROBE_OUT" ] || rm -f "$PROBE_OUT"' EXIT
+
 # Is the binary at $1 really Claude Code? Ask it, and trust only what it says.
 #
 # The answer goes to a temporary file, not through a pipe or a $(...): the shell
@@ -191,12 +200,13 @@ run_bounded() {
 # to be among the first 4096 characters of the answer. A different tool, or an
 # error that merely mentions Claude Code, does not say that.
 is_claude_code() { # is_claude_code <binary>
-  local out="" said="" rest="" line=""
-  out="$(mktemp "${TMPDIR:-/tmp}/claude-probe.XXXXXX" 2>/dev/null || mktemp /tmp/claude-probe.XXXXXX 2>/dev/null)" || out=""
-  if [ -n "$out" ]; then
-    run_bounded "$1" --version >"$out" 2>&1 || true
-    said="$(cat "$out" 2>/dev/null || true)"
-    rm -f "$out"
+  local said="" rest="" line=""
+  PROBE_OUT="$(mktemp "${TMPDIR:-/tmp}/claude-probe.XXXXXX" 2>/dev/null || mktemp /tmp/claude-probe.XXXXXX 2>/dev/null)" || PROBE_OUT=""
+  if [ -n "$PROBE_OUT" ]; then
+    run_bounded "$1" --version >"$PROBE_OUT" 2>&1 || true
+    said="$(cat "$PROBE_OUT" 2>/dev/null || true)"
+    rm -f "$PROBE_OUT"
+    PROBE_OUT=""
   else
     said="$(run_bounded "$1" --version 2>&1 || true)"
   fi
