@@ -1,11 +1,11 @@
 """Scope least-privilege guard — the requested OAuth scopes stay minimal.
 
-No network, no keyring: asserts on the static SCOPES list. Least privilege is a
-SEPARATE invariant from "scopes match across surfaces" — this locks it so a
-broader scope can't silently creep in. An over-broad scope is the corporate
+No network, no keyring: asserts on the static SCOPES list, and reads SETUP.md
+and GUIDED-SETUP.md to check that they list the same scopes. Least privilege
+is a SEPARATE invariant from "scopes match across surfaces" — this locks it so
+a broader scope can't silently creep in. An over-broad scope is the corporate
 admin-consent rejection surface for the 30X cohort. See the audit note above
-accounts.SCOPES and the shared-brain rule "A Connector Requests Least-Privilege
-Scopes, Audited Against Its Real Call Surface Before the App Is Minted" (MYC-2578).
+accounts.SCOPES: each scope is audited against the actual tool call surface.
 """
 from __future__ import annotations
 
