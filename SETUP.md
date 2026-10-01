@@ -105,7 +105,7 @@ Confirm `google-workspace` appears. Then, in a message:
 
 > Call gws_account_add
 
-A browser window opens. Sign in with the first account (e.g. `you@yourcompany.com`), grant all requested scopes, wait for the "authentication flow complete" page, come back to Claude.
+A browser window opens. Sign in with the first account (e.g. `you@yourcompany.com`), grant all requested scopes, wait for the "authentication flow complete" page, come back to Claude. If Google first shows "Google hasn't verified this app", that is expected for an app you created yourself, so choose **Advanced → Go to _(app name)_ (unsafe)**, and never do that for an app you did not create.
 
 Repeat for each real mailbox you want connected:
 
