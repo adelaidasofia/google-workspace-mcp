@@ -94,7 +94,9 @@ def _assert_nothing_real_is_reachable(env: dict, root: Path, *, shim_expected: b
 
     `claude` must resolve to nothing at all (`shim_expected=False`: the tests that
     need `claude` to be absent from PATH also depend on this), or to a shim inside
-    `root`. HOME and CLAUDE_CONFIG_DIR must point inside `root` as well.
+    `root`. HOME and CLAUDE_CONFIG_DIR must point inside `root` as well, and so
+    must CLAUDE_CODE_EXECPATH when it is set: it is the installer's second way of
+    reaching a binary, and one outside `root` is run just as a PATH one would be.
     """
     root = root.resolve()
     found = _command_found_on(env, "claude")
@@ -107,6 +109,12 @@ def _assert_nothing_real_is_reachable(env: dict, root: Path, *, shim_expected: b
     for key in ("HOME", "CLAUDE_CONFIG_DIR"):
         assert Path(env[key]).resolve().is_relative_to(root), (
             f"{key} must point inside this test's own tmp dir, got {env[key]!r}"
+        )
+    execpath = env.get("CLAUDE_CODE_EXECPATH")
+    if execpath:
+        assert Path(execpath).resolve().is_relative_to(root), (
+            f"CLAUDE_CODE_EXECPATH must point inside this test's own tmp dir, got {execpath!r}: "
+            f"install.sh runs whatever it names with --version, and as `claude mcp add` if it answers"
         )
 
 
@@ -813,6 +821,33 @@ def test_the_guard_fails_when_the_config_would_not_be_a_throwaway(tmp_path, key)
 
     with pytest.raises(AssertionError, match=key):
         _assert_nothing_real_is_reachable(env, root, shim_expected=False)
+
+
+def test_the_guard_fails_when_claude_code_execpath_points_outside_the_tmp_dir(tmp_path):
+    """Negative control for the installer's second way of reaching a binary.
+    CLAUDE_CODE_EXECPATH names something install.sh runs with --version, and as
+    `claude mcp add` if it answers as Claude Code, so when it is set it has to
+    resolve inside the test's own tmp dir, symlinks followed."""
+    root = tmp_path / "fixture"
+    root.mkdir()
+    elsewhere = tmp_path / "somewhere-else"
+    elsewhere.mkdir()
+    real = elsewhere / "claude"
+    _exe(real, "#!/bin/sh\nexit 0\n")
+    inside = root / "claude"
+    _exe(inside, "#!/bin/sh\nexit 0\n")
+    disguised = root / "claude-link"
+    disguised.symlink_to(real)
+    env = {"PATH": str(root / "empty"), "NO_COLOR": "1", **_throwaway_config(root)}
+
+    for outside in (real, disguised):
+        with pytest.raises(AssertionError, match="CLAUDE_CODE_EXECPATH"):
+            _assert_nothing_real_is_reachable(
+                {**env, "CLAUDE_CODE_EXECPATH": str(outside)}, root, shim_expected=False
+            )
+    _assert_nothing_real_is_reachable({**env, "CLAUDE_CODE_EXECPATH": str(inside)}, root, shim_expected=False)
+    # An empty value is "not set" to install.sh, so it is to the guard.
+    _assert_nothing_real_is_reachable({**env, "CLAUDE_CODE_EXECPATH": ""}, root, shim_expected=False)
 
 
 def test_the_claude_the_installer_runs_only_sees_a_throwaway_config(box):
