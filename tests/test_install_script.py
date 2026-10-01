@@ -393,10 +393,11 @@ def test_a_broken_override_fails_instead_of_searching_past_it(sealed):
 # finds nothing.
 # ---------------------------------------------------------------------------
 
-# perl is what bounds the --version probe to ten seconds. It is a tool on the
-# sealed PATH like the others, so a test can take it away and see what the
-# installer does without it.
-EXECPATH_TOOLS = BASE_TOOLS + ("perl",)
+# perl is what bounds the --version probe to ten seconds, but the probe works
+# without it, so it is not one of the tools every test needs. `bare_box` links it
+# in when the host has one, a test of the bound asks for it with _require_perl,
+# and a test of the no-perl case takes it away. A host with no perl then skips
+# only the tests of the bound, not the whole group.
 
 
 @pytest.fixture
@@ -415,11 +416,14 @@ def bare_box(tmp_path):
 
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    for tool in EXECPATH_TOOLS:
+    for tool in BASE_TOOLS:
         real = shutil.which(tool)
         if real is None:
             pytest.skip(f"{tool} unavailable, cannot seal PATH")
         (bindir / tool).symlink_to(real)
+    perl = shutil.which("perl")
+    if perl is not None:
+        (bindir / "perl").symlink_to(perl)
     _exe(bindir / "git", "#!/bin/sh\nexit 0\n")
     # A qualifying interpreter, so the run reaches the claude check at all --
     # interpreter discovery is not what these tests are about.
@@ -525,6 +529,12 @@ def _probe_leftovers(fx) -> list:
     return sorted(p.name for p in (fx["root"] / "tmp").glob("claude-probe.*"))
 
 
+def _require_perl(fx) -> None:
+    """The ten-second bound is perl's alarm: a test of it needs perl on the sealed PATH."""
+    if not (fx["bin"] / "perl").exists():
+        pytest.skip("perl unavailable, so the probe has no ten-second bound to test")
+
+
 @pytest.mark.skipif(BASH is None, reason="bash not found")
 def test_execpath_is_used_when_claude_is_not_on_path(bare_box, tmp_path):
     """The reported case: inside the Claude desktop app's Code tab, `claude`
@@ -624,6 +634,7 @@ def test_an_execpath_that_hangs_on_version_is_given_up_on(bare_box, tmp_path):
     nothing is rejected either way."""
     execpath = tmp_path / "claude-hangs"
     _hanging_claude(execpath)
+    _require_perl(bare_box)
 
     started = time.monotonic()
     proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
@@ -666,6 +677,7 @@ def test_a_wrapper_whose_child_outlives_the_bound_is_still_cut_off_on_time(bare_
     open must not stretch the wait past it."""
     execpath = tmp_path / "claude-wrapper"
     _claude_with_a_lingering_child(execpath, bare_box["log"], answers=False)
+    _require_perl(bare_box)
 
     started = time.monotonic()
     proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
@@ -685,7 +697,7 @@ def test_a_wrapper_whose_child_outlives_the_bound_is_still_cut_off_on_time(bare_
 def test_an_execpath_is_still_used_where_perl_is_missing(bare_box, tmp_path):
     """The ten-second bound needs perl. Without it the question is asked
     unbounded rather than not asked: no perl must never mean no fallback."""
-    (bare_box["bin"] / "perl").unlink()
+    (bare_box["bin"] / "perl").unlink(missing_ok=True)
     execpath = tmp_path / "claude"
     _recording_claude(execpath, bare_box["log"], "2.1.281 (Claude Code)")
     # Control: this PATH really has no perl, so the unbounded branch is the one that runs.
