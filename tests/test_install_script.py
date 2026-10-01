@@ -164,16 +164,17 @@ def _box_env(box, **creds):
     return env
 
 
-def _run_installer(fx, env, *, shim_expected):
+def _run_installer(fx, env, *, shim_expected, stdin=""):
     """The one place install.sh is started: the guard first, then the run.
 
     Every runner below goes through here, so a run cannot skip the guard by
     forgetting it; test_every_runner_checks_the_guard_... shows that it cannot.
+    `stdin` is what the installer is handed on its standard input.
     """
     _assert_nothing_real_is_reachable(env, fx["root"], shim_expected=shim_expected)
     proc = subprocess.run(
         [BASH or "bash", str(fx["repo"] / "install.sh")],
-        capture_output=True, text=True, env=env, input="", timeout=120,
+        capture_output=True, text=True, env=env, input=stdin, timeout=120,
     )
     return proc, fx["log"].read_text()
 
@@ -457,8 +458,8 @@ def bare_box(tmp_path):
     return {"repo": repo, "bin": bindir, "log": log, "root": tmp_path}
 
 
-def _run_bare(bare_box, **extra):
-    return _run_installer(bare_box, _sealed_env(bare_box, **extra), shim_expected=False)
+def _run_bare(bare_box, *, stdin="", **extra):
+    return _run_installer(bare_box, _sealed_env(bare_box, **extra), shim_expected=False, stdin=stdin)
 
 
 def _recording_claude(
@@ -784,6 +785,38 @@ def test_a_wrapper_whose_child_outlives_the_bound_is_still_cut_off_on_time(bare_
     assert "mcp add" not in calls
     assert "Claude Code is not installed" in proc.stderr, proc.stderr
     assert _probe_leftovers(bare_box) == []
+
+
+@pytest.mark.parametrize("with_perl", [True, False], ids=["bounded-by-perl", "unbounded-without-perl"])
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_the_version_probe_never_reads_the_installers_stdin(bare_box, tmp_path, with_perl):
+    """The installer's stdin can be a terminal, or the script itself when it is
+    piped in. The binary asked for its version must not be handed it: one that
+    reads its stdin would swallow whatever is waiting there. Both ways of asking
+    are pinned, the one bounded by perl and the one that is not."""
+    if with_perl:
+        _require_perl(bare_box)
+    else:
+        (bare_box["bin"] / "perl").unlink(missing_ok=True)
+    seen = tmp_path / "stdin-seen-by-claude.log"
+    execpath = tmp_path / "claude-reads-stdin"
+    _exe(
+        execpath,
+        f"""#!/bin/sh
+if [ "$1" = "--version" ]; then
+  cat > "{seen}"
+  echo "2.1.281 (Claude Code)"
+  exit 0
+fi
+exit 0
+""",
+    )
+
+    proc, _ = _run_bare(bare_box, stdin="typed by the person\n", CLAUDE_CODE_EXECPATH=str(execpath))
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert seen.exists(), "the stand-in was never asked for its version"
+    assert seen.read_text() == "", "the version probe was handed the installer's stdin"
 
 
 @pytest.mark.skipif(BASH is None, reason="bash not found")
