@@ -13,10 +13,10 @@ This is the setup path for someone who wants Claude to connect their Gmail, Cale
 
 ## Security model
 
-- The Google app is theirs, inside their own Google account. No one else can use it.
+- The Google app is theirs, inside their own Google account. Once it is published, anyone who has its Client ID and secret can open a sign-in screen for it, so both stay private.
 - Tokens stay on their computer, in the operating system's credential store. No third-party server is involved.
 - "Google hasn't verified this app" is expected for a personal app. Continuing past it on their own app is safe.
-- Publishing the app ("In production") only removes the 7-day logout that Testing mode imposes. It does not list the app anywhere or make it public.
+- Publishing the app ("In production") removes the 7-day logout that Testing mode imposes. It does not list the app anywhere, but any Google account can then authorize it, after the "Google hasn't verified this app" click-through.
 - A Desktop client's "client secret" identifies the app. Google treats it as non-confidential for desktop apps, so passing it to the installer is fine.
 
 ## Steps
@@ -31,7 +31,7 @@ On Windows, see [Windows](#windows) below.
 
 ### 2. Create their Google app (Claude in Chrome)
 
-The person gets this message, translated into their language, with the nine scope lines kept exactly as written:
+The person gets this message, translated into their language, with the scope lines kept exactly as written:
 
 ```text
 Help me create my own Google app so a program on my computer can use my Gmail, Calendar, Drive, Docs and Sheets. Do all the clicking for me in Google Cloud Console (console.cloud.google.com), signed in as me. Ask me before you accept any terms. If a page asks for my password or a code from my phone, stop and let me type it.
@@ -40,7 +40,7 @@ Help me create my own Google app so a program on my computer can use my Gmail, C
 2. Enable these 5 APIs in that project: Gmail API, Google Calendar API, Google Drive API, Google Docs API, Google Sheets API.
 3. Open Google Auth Platform. If it offers "Get started": app name "My email with Claude", support email = my email, Audience = External, contact email = my email, agree to the policy, Create.
 4. Audience: if the publishing status is "Testing", click "Publish app" and confirm, so it says "In production".
-5. Data Access: click "Add or remove scopes", paste these 9 lines into the box for adding scopes manually, then click "Add to table", "Update" and "Save":
+5. Data Access: click "Add or remove scopes", paste these lines into the box for adding scopes manually, then click "Add to table", "Update" and "Save":
 https://www.googleapis.com/auth/gmail.modify
 https://www.googleapis.com/auth/gmail.send
 https://www.googleapis.com/auth/gmail.settings.basic
@@ -87,7 +87,7 @@ Claude in Chrome then clicks Advanced, continues to the app, ticks every permiss
 | What they see | What to do |
 |---|---|
 | "Access blocked" on a work account | The company must trust the app. The IT message below, with their Client ID filled in, asks for that. A personal Gmail can be connected in the meantime. |
-| "Error 400: invalid_scope" | One of the nine lines in step 2.5 is missing. Send Claude in Chrome back to Data Access to add it. |
+| "Error 400: invalid_scope" | One of the scope lines in step 2.5 is missing. Send Claude in Chrome back to Data Access to add it. |
 | "Error 400: redirect_uri_mismatch" | The client is not a "Desktop app". Create a Desktop app client and install again with its values. |
 | Worked, then stopped about a week later | The app is still in Testing. Publish it (step 2.4), then run `gws_account_add` again. |
 | macOS asks for the keychain password on every call | See SETUP.md, "Keychain password prompts every tool call". |

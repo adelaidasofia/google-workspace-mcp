@@ -1,16 +1,19 @@
 """Scope least-privilege guard — the requested OAuth scopes stay minimal.
 
-No network, no keyring: asserts on the static SCOPES list. Least privilege is a
-SEPARATE invariant from "scopes match across surfaces" — this locks it so a
-broader scope can't silently creep in. An over-broad scope is the corporate
+No network, no keyring: asserts on the static SCOPES list, and reads SETUP.md
+and GUIDED-SETUP.md to check that they list the same scopes. Least privilege
+is a SEPARATE invariant from "scopes match across surfaces" — this locks it so
+a broader scope can't silently creep in. An over-broad scope is the corporate
 admin-consent rejection surface for the 30X cohort. See the audit note above
-accounts.SCOPES and the shared-brain rule "A Connector Requests Least-Privilege
-Scopes, Audited Against Its Real Call Surface Before the App Is Minted" (MYC-2578).
+accounts.SCOPES: each scope is audited against the actual tool call surface.
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -38,3 +41,34 @@ def test_no_over_broad_gmail_scope():
     # Full-mailbox scope (IMAP/SMTP + permanent delete). gmail.modify + gmail.send
     # cover every Gmail tool; the full scope must never be requested.
     assert "https://mail.google.com/" not in accounts.SCOPES
+
+
+# The docs are a second surface for the same list: the browser steps paste
+# these lines into Google's manual "add scopes" box. A doc that drifts from
+# SCOPES fails later as "invalid_scope" on a user's machine, and Google's box
+# rejects the shortened ".../auth/x" form the scope picker displays.
+DOCS_WITH_SCOPE_LISTS = ["SETUP.md", "GUIDED-SETUP.md"]
+
+
+def _listed_scopes(text: str) -> set[str]:
+    return {
+        line.strip()
+        for line in text.splitlines()
+        if line.strip().startswith("https://www.googleapis.com/auth/") or line.strip() == "openid"
+    }
+
+
+@pytest.mark.parametrize("doc", DOCS_WITH_SCOPE_LISTS)
+def test_setup_docs_list_exactly_the_requested_scopes(doc):
+    text = (ROOT / doc).read_text(encoding="utf-8")
+    assert _listed_scopes(text) == set(accounts.SCOPES)
+
+
+@pytest.mark.parametrize("doc", DOCS_WITH_SCOPE_LISTS)
+def test_setup_docs_never_show_the_shortened_scope_form(doc):
+    text = (ROOT / doc).read_text(encoding="utf-8")
+    # Anywhere in the text, not only on a line of its own: a bullet, a table
+    # cell or a numbered item that shows ".../auth/gmail.modify" is still
+    # something a reader will paste. A prose mention of ".../auth/..." has no
+    # letter after the slash, so it does not match.
+    assert not re.search(r"\.\.\./auth/[A-Za-z]", text)
