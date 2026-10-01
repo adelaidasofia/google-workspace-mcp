@@ -459,9 +459,14 @@ def _recording_claude(
     version_on: str = "stdout",
     add_exit: int = 0,
 ) -> None:
-    """A shim that answers --version on its own, and otherwise behaves like
-    the `claude` shim in `box` / `sealed`: records its argv, and heals on
-    `mcp remove` of something not yet registered by exiting 1.
+    """A shim that answers --version, and otherwise behaves like the `claude`
+    shim in `box` / `sealed`: records its argv, and heals on `mcp remove` of
+    something not yet registered by exiting 1.
+
+    It records every call, --version included, and does so before it answers: a
+    test that needs to know whether the installer asked it anything at all (the
+    app's copy must not even be probed when `claude` is on PATH) can only see
+    that if the question itself is logged.
 
     `version_exit` and `version_on` shape how it answers --version (which stream
     it prints on, and what it exits with afterwards); `add_exit` is what
@@ -471,11 +476,11 @@ def _recording_claude(
     _exe(
         path,
         f"""#!/bin/sh
+echo "$*" >> "{log}"
 if [ "$1" = "--version" ]; then
   echo "{version_line}"{to_stderr}
   exit {version_exit}
 fi
-echo "$*" >> "{log}"
 case "$2" in
   remove) exit 1 ;;
   add) exit {add_exit} ;;
@@ -563,6 +568,8 @@ def test_execpath_is_used_when_claude_is_not_on_path(bare_box, tmp_path):
     proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
+    # The app's copy is asked what it is before it is used.
+    assert calls.splitlines()[0] == "--version", calls
     add = [ln for ln in calls.splitlines() if ln.startswith("mcp add")]
     assert len(add) == 1, f"expected one `mcp add`, got {calls!r}"
     argv = add[0]
@@ -761,6 +768,7 @@ def test_path_wins_over_execpath(sealed, tmp_path):
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "mcp add google-workspace" in calls
+    # Not even asked what it is: every call the shim gets is logged, --version too.
     assert execpath_log.read_text() == "", "the execpath shim must not have been invoked"
 
 
