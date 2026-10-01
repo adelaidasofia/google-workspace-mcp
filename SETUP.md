@@ -285,7 +285,7 @@ One person creates the app once, then everyone else uses shared-client mode abov
 
 **"No refresh token for X"** — you authorized the account but Google didn't return a refresh token. Go to https://myaccount.google.com/permissions, revoke "Google Workspace MCP", then re-run `gws_account_add`. The `prompt=consent` flag forces a fresh token on re-auth.
 
-**"Access blocked: google-workspace-mcp has not completed verification"** — the email you're signing in with is not on the test-users list (§3 step 2). Add it and retry, or publish the app.
+**"Access blocked: Google Workspace MCP has not completed verification"** — the email you're signing in with is not on the test-users list (§3 step 2). Add it and retry, or publish the app.
 
 **"Invalid scope" on OAuth** — the scopes listed in §3 step 3 don't match what `accounts.py` requests. Re-check the consent screen scopes.
 
