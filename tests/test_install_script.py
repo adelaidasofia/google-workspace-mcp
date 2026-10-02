@@ -787,10 +787,11 @@ def test_an_execpath_that_is_not_claude_code_is_rejected(bare_box, tmp_path):
 )
 @pytest.mark.skipif(BASH is None, reason="bash not found")
 def test_an_execpath_that_only_mentions_claude_code_is_rejected(bare_box, tmp_path, said, on, code):
-    """What counts is a line that is exactly what `claude --version` prints,
-    "<version> (Claude Code)". An executable that merely mentions Claude Code, in
-    an error or in other words, is not it, and must not be registered with
-    `mcp add`."""
+    """What counts is a line shaped like what `claude --version` prints,
+    "<version> (Claude Code)": it starts with a digit, has no space in the
+    version, and ends with " (Claude Code)". An executable that merely mentions
+    Claude Code, in an error or in other words, is not it, and must not be
+    registered with `mcp add`."""
     execpath = tmp_path / "claude-in-name-only"
     _recording_claude(execpath, bare_box["log"], said, version_exit=code, version_on=on)
 

@@ -194,11 +194,13 @@ trap '[ -z "$PROBE_OUT" ] || rm -f "$PROBE_OUT"' EXIT
 # through $(...), and that waits for a child that keeps the output open for as
 # long as the child does.
 #
-# What counts is a line that is exactly what `claude --version` prints:
-# "<version> (Claude Code)". It does not have to be the first line, so a warning
-# printed ahead of the banner does not turn a real Claude Code away, but it has
-# to be among the first 4096 characters of the answer. A different tool, or an
-# error that merely mentions Claude Code, does not say that.
+# What counts is a line shaped like what `claude --version` prints,
+# "<version> (Claude Code)": it starts with a digit, has no space in the
+# version, and ends with " (Claude Code)". It does not have to be the first
+# line, so a warning printed ahead of the banner does not turn a real Claude
+# Code away, but it has to be among the first 4096 characters of the answer. A
+# different tool, or an error that merely mentions Claude Code, does not say
+# that.
 is_claude_code() { # is_claude_code <binary>
   local said="" rest="" line=""
   PROBE_OUT="$(mktemp "${TMPDIR:-/tmp}/claude-probe.XXXXXX" 2>/dev/null || mktemp /tmp/claude-probe.XXXXXX 2>/dev/null)" || PROBE_OUT=""
