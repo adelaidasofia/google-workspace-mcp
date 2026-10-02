@@ -157,10 +157,111 @@ if [ -z "$PY" ]; then
 fi
 ok "python3 $PY_VER  ($PY)"
 
-command -v claude >/dev/null 2>&1 || die \
+# Run a command for at most ten seconds, with nothing on its stdin, so a binary
+# that hangs, or that waits for input, cannot hang the installer. Stock macOS has
+# no `timeout`, but it does have perl, and perl's alarm survives the exec that
+# follows it. Where there is no perl the command still runs, just unbounded:
+# asked, rather than not asked.
+run_bounded() {
+  if command -v perl >/dev/null 2>&1; then
+    perl -e 'alarm shift; exec @ARGV' 10 "$@" </dev/null
+  else
+    "$@" </dev/null
+  fi
+}
+
+# The temporary file the probe below writes the binary's answer to. An interrupt
+# while the probe waits on a binary that is not answering (Ctrl-C, the window
+# closing, a TERM) would otherwise leave it in TMPDIR, or in /tmp. A trap runs
+# after the function's locals are gone, so the name is a global, and an EXIT trap
+# removes whatever it names. The probe removes the file itself as soon as it has
+# read it, and then forgets the name.
+PROBE_OUT=""
+trap '[ -z "$PROBE_OUT" ] || rm -f "$PROBE_OUT"' EXIT
+
+# Is the binary at $1 really Claude Code? Ask it, and trust only what it says.
+#
+# The answer goes to a temporary file, not through a pipe or a $(...): the shell
+# then waits for the process it started and no longer, so a child that process
+# leaves behind holding its output open (a wrapper script, a helper) cannot
+# stretch the ten seconds. It is matched afterwards, never piped straight into
+# grep: under `set -o pipefail` a binary that printed its banner and then exited
+# non-zero would fail the whole pipeline and be thrown out as "not Claude Code",
+# when what it said is the only thing being asked about. Both streams are read:
+# a banner printed only on stderr is still a banner. A TMPDIR that names a
+# directory that does not exist does not change any of that: the file is made in
+# /tmp instead. Only where there is no usable mktemp at all is the answer read
+# through $(...), and that waits for a child that keeps the output open for as
+# long as the child does.
+#
+# What counts is a line shaped like what `claude --version` prints,
+# "<version> (Claude Code)": it starts with a digit, has no space in the
+# version, and ends with " (Claude Code)". It does not have to be the first
+# line, so a warning printed ahead of the banner does not turn a real Claude
+# Code away, but it has to be among the first 4096 characters of the answer. A
+# different tool, or an error that merely mentions Claude Code, does not say
+# that.
+is_claude_code() { # is_claude_code <binary>
+  local said="" rest="" line=""
+  PROBE_OUT="$(mktemp "${TMPDIR:-/tmp}/claude-probe.XXXXXX" 2>/dev/null || mktemp /tmp/claude-probe.XXXXXX 2>/dev/null)" || PROBE_OUT=""
+  if [ -n "$PROBE_OUT" ]; then
+    run_bounded "$1" --version >"$PROBE_OUT" 2>&1 || true
+    said="$(cat "$PROBE_OUT" 2>/dev/null || true)"
+    rm -f "$PROBE_OUT"
+    PROBE_OUT=""
+  else
+    said="$(run_bounded "$1" --version 2>&1 || true)"
+  fi
+  # Only the start of the answer is looked at. The banner is one short line, and
+  # going through pages of output one line at a time takes bash far longer than
+  # that is worth: the time grows much faster than the length does.
+  said="${said:0:4096}"
+  rest="$said"
+  while [ -n "$rest" ]; do
+    line="${rest%%$'\n'*}"
+    case "$line" in
+      *" "*" (Claude Code)") ;;
+      [0-9]*" (Claude Code)") return 0 ;;
+    esac
+    [ "$line" = "$rest" ] && break
+    rest="${rest#*$'\n'}"
+  done
+  return 1
+}
+
+# The Claude Code CLI might not be on PATH: running this from inside the
+# Claude desktop app's own Code tab, `claude` is often missing there, but the
+# app exports CLAUDE_CODE_EXECPATH pointing at the copy of Claude Code it
+# runs itself, so fall back to that -- but only once it proves it really is
+# Claude Code, never on the strength of the env var's name alone.
+CLAUDE_BIN=""
+if command -v claude >/dev/null 2>&1; then
+  CLAUDE_BIN="claude"
+  ok "claude"
+elif [ -n "${CLAUDE_CODE_EXECPATH:-}" ] && [ -f "$CLAUDE_CODE_EXECPATH" ] \
+     && [ -x "$CLAUDE_CODE_EXECPATH" ] && is_claude_code "$CLAUDE_CODE_EXECPATH"; then
+  CLAUDE_BIN="$CLAUDE_CODE_EXECPATH"
+  ok "using the copy of Claude Code that the Claude desktop app runs"
+elif [ -n "${CLAUDE_CODE_EXECPATH:-}" ]; then
+  # It was set and was not usable: missing, not executable, a different program,
+  # or silent past the ten second bound (which only exists where there is perl).
+  # Saying Claude Code is not installed would be wrong news about a copy that may
+  # be sitting right there, so say what was refused. Two things the message keeps
+  # out: a time limit, since without perl there is none, and a `claude --version`
+  # check in Terminal, which for the people this is for only prints "command not
+  # found".
+  die \
+"Claude Code is not on your PATH, and CLAUDE_CODE_EXECPATH is set to something that could not be used instead:
+     $CLAUDE_CODE_EXECPATH
+   It has to be an executable file that answers  --version  with a line like
+   \"2.1.281 (Claude Code)\".
+   In the Claude desktop app: put the app's own copy of Claude Code on PATH, then run this script again.
+   Anywhere else: install Claude Code first, quit and reopen Terminal, then run this script again."
+else
+  die \
 "Claude Code is not installed, or its 'claude' command is not on your PATH.
    Install Claude Code first, quit and reopen Terminal, then run this again."
-ok "claude"
+fi
 
 [ -f "$SCRIPT_DIR/server.py" ] || die \
 "This script is not sitting next to server.py, so the clone looks incomplete.
@@ -281,15 +382,27 @@ step "Connecting it to Claude Code"
 # Re-running should heal a bad value rather than fail on "already exists". The
 # remove is unconditional and its failure ignored, so this does not depend on
 # parsing `claude mcp list` output, which is a display format, not a contract.
-claude mcp remove "$SERVER_NAME" -s user >/dev/null 2>&1 || true
+"$CLAUDE_BIN" mcp remove "$SERVER_NAME" -s user >/dev/null 2>&1 || true
 
-claude mcp add "$SERVER_NAME" -s user \
+# If registering fails, the person is told what to run to see why. That has to be
+# the binary that was just run: the desktop app's copy is not on PATH, so a bare
+# `claude` would be a command that does not exist for them. Every path in it goes
+# through shq, so one with a space in it ("Application Support"), a quote or a `$`
+# can still be pasted as it is.
+shq() { # shq <string> -> <string> as one shell word, read back exactly as it was
+  case "$1" in
+    ""|*[!_./:=@%+,[:alnum:]-]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+"$CLAUDE_BIN" mcp add "$SERVER_NAME" -s user \
   -e "GWS_CLIENT_ID=$CLIENT_ID" \
   -e "GWS_CLIENT_SECRET=$CLIENT_SECRET" \
   -- "$VENV_PY" "$SCRIPT_DIR/server.py" >/dev/null || die \
 "Could not register the connector with Claude Code.
    Run this to see the error:
-     claude mcp add $SERVER_NAME -s user -e GWS_CLIENT_ID=... -e GWS_CLIENT_SECRET=... -- $VENV_PY $SCRIPT_DIR/server.py"
+     $(shq "$CLAUDE_BIN") mcp add $SERVER_NAME -s user -e GWS_CLIENT_ID=... -e GWS_CLIENT_SECRET=... -- $(shq "$VENV_PY") $(shq "$SCRIPT_DIR/server.py")"
 
 ok "registered as \"$SERVER_NAME\""
 
