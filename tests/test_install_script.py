@@ -1090,6 +1090,37 @@ def test_a_signal_while_the_probe_waits_leaves_no_scratch_file(bare_box, tmp_pat
     assert _probe_leftovers(bare_box) == []
 
 
+@pytest.mark.skipif(BASH is None, reason="bash not found")
+def test_a_file_that_takes_the_probes_scratch_name_later_is_left_alone(bare_box, tmp_path):
+    """The EXIT trap removes whatever PROBE_OUT names, so once the probe has removed
+    its own file it has to forget the name: after that the name is not the
+    installer's, and a file somebody else puts under it survives however the
+    installer ends. A `mktemp` that always hands out the same name makes that reuse
+    certain; with the real one it would take a random name coming up twice."""
+    taken = bare_box["root"] / "tmp" / "claude-probe.REUSED"
+    (bare_box["bin"] / "mktemp").unlink()
+    _exe(bare_box["bin"] / "mktemp", f'#!/bin/sh\n: > "{taken}"\nprintf "%s\\n" "{taken}"\n')
+    execpath = tmp_path / "claude-app"
+    _exe(
+        execpath,
+        f"""#!/bin/sh
+echo "$*" >> "{bare_box["log"]}"
+if [ "$1" = "--version" ]; then echo "2.1.281 (Claude Code)"; exit 0; fi
+case "$2" in
+  remove) exit 1 ;;
+  add) echo "somebody else's file" > "{taken}"; exit 0 ;;
+esac
+exit 0
+""",
+    )
+
+    proc, calls = _run_bare(bare_box, CLAUDE_CODE_EXECPATH=str(execpath))
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "mcp add google-workspace" in calls
+    assert taken.read_text() == "somebody else's file\n"
+
+
 @pytest.mark.parametrize("with_perl", [True, False], ids=["bounded-by-perl", "unbounded-without-perl"])
 @pytest.mark.skipif(BASH is None, reason="bash not found")
 def test_the_version_probe_never_reads_the_installers_stdin(bare_box, tmp_path, with_perl):
