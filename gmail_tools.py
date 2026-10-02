@@ -248,6 +248,12 @@ def read(
     return {**_summary(msg, lbls), "body": _extract_body(msg.get("payload", {}), keep_html)}
 
 
+# A body that opens with markup (a tag, a doctype or a comment) is HTML. A bare
+# "<" is not: "<https://example.com>" opening a plain note stays plain text,
+# because as HTML the link would render as nothing.
+_HTML_START = re.compile(r"\s*<(?:!doctype\b|!--|[a-z][a-z0-9-]*[\s/>])", re.IGNORECASE)
+
+
 def _build_raw(
     to: list[str],
     subject: str,
@@ -275,7 +281,14 @@ def _build_raw(
         msg["In-Reply-To"] = in_reply_to
     if references:
         msg["References"] = references
-    msg.set_content(body)
+    # HTML bodies ship as multipart/alternative so Gmail renders them as a
+    # normal wide email instead of a hard-wrapped text/plain column, with the
+    # stripped text as the fallback part. Plain bodies behave exactly as before.
+    if _HTML_START.match(body):
+        msg.set_content(_strip_html(body))
+        msg.add_alternative(body, subtype="html")
+    else:
+        msg.set_content(body)
 
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
     return raw, thread_message_id
