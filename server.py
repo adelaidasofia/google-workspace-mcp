@@ -133,6 +133,9 @@ def gmail_send(
     """Send an email. DESTRUCTIVE — irreversible once sent.
 
     Args:
+        body: Plain text or HTML. A body that opens with an HTML tag (e.g.
+            "<p>") becomes an HTML email with a plain-text fallback; any
+            other body stays plain text.
         from_alias: Send-as identity (e.g. 'ops@example.com'). The
             authenticated `account` must have this alias configured in Gmail.
             Use gmail_sendas_list to see available aliases.
@@ -156,7 +159,13 @@ def gmail_draft(
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
 ) -> dict:
-    """Create a draft. Does not send."""
+    """Create a draft. Does not send.
+
+    Args:
+        body: Plain text or HTML. A body that opens with an HTML tag (e.g.
+            "<p>") becomes an HTML email with a plain-text fallback; any
+            other body stays plain text.
+    """
     return gmail_tools.draft(
         to=to, subject=subject, body=body, account=account,
         from_alias=from_alias, cc=cc, bcc=bcc,
@@ -175,6 +184,9 @@ def gmail_reply(
     Preserves thread + headers.
 
     Args:
+        body: Plain text or HTML. A body that opens with an HTML tag (e.g.
+            "<p>") becomes an HTML email with a plain-text fallback; any
+            other body stays plain text.
         dry_run: If True, show what WOULD be sent without sending.
     """
     return gmail_tools.reply(
