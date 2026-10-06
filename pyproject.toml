@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
     "fastmcp>=4.0.10",
     "google-auth>=2.59.1",
-    "google-auth-oauthlib>=1.4.1",
+    "google-auth-oauthlib>=1.5.0",
     "google-api-python-client>=2.201.0",
     "keyring>=25.7.0",
     # Local IANA zone on Windows, which has no /etc/localtime.
