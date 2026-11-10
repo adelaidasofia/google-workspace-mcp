@@ -7,6 +7,7 @@ reads are opt-in via structured=True.
 
 from __future__ import annotations
 
+import pathlib
 from typing import Any
 
 import audit
@@ -311,16 +312,25 @@ def export(
     mime: str = "text/markdown",
     account: str | None = None,
     max_chars: int = 100_000,
+    save_to: str | None = None,
 ) -> dict:
     """Export a Doc to plain text, markdown, pdf, etc. via Drive export.
 
     Args:
         mime: 'text/plain' | 'text/markdown' | 'application/pdf' | 'application/rtf' |
               'application/vnd.openxmlformats-officedocument.wordprocessingml.document' (.docx)
+        save_to: Local file path. If set, the exported bytes are written there
+            (parent folders created) and the path is returned instead of the
+            content. The only way to get a binary export such as PDF out.
     """
     drive = service("drive", "v3", account=account)
     request = drive.files().export_media(fileId=document_id, mimeType=mime)
     data = request.execute()
+    if save_to:
+        path = pathlib.Path(save_to).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return {"id": document_id, "mime": mime, "path": str(path), "bytes": len(data)}
     try:
         text = data.decode("utf-8")
         truncated = len(text) > max_chars
@@ -329,4 +339,4 @@ def export(
         return {"id": document_id, "mime": mime, "content": text, "truncated": truncated}
     except (UnicodeDecodeError, AttributeError):
         return {"id": document_id, "mime": mime, "bytes": len(data), "content": None,
-                "note": "Binary export — download via drive_read_file or save locally"}
+                "note": "Binary export — pass save_to to write it to a local file"}

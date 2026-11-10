@@ -11,6 +11,7 @@ Design rules:
 from __future__ import annotations
 
 import io
+import pathlib
 from typing import Any
 
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
@@ -104,6 +105,7 @@ def read_file(
     include_content: bool = False,
     export_mime: str | None = None,
     max_chars: int = 50_000,
+    save_to: str | None = None,
 ) -> dict:
     """Read file metadata. Content is opt-in via include_content=True.
 
@@ -116,6 +118,10 @@ def read_file(
             (e.g. 'application/pdf' for a Doc, 'text/markdown' for Docs).
             Ignored for non-Google files.
         max_chars: Truncate body to this many characters. Default 50k.
+        save_to: Local file path. If set, the content (exported per export_mime
+            for Google-native files) is downloaded and written there, parent
+            folders created, and the path is returned instead of the content.
+            Implies include_content. The way to get a PDF or other binary out.
     """
     svc = service("drive", "v3", account=account)
     meta = (
@@ -123,7 +129,7 @@ def read_file(
         .get(fileId=file_id, fields=_BASE_FIELDS, supportsAllDrives=True)
         .execute()
     )
-    if not include_content:
+    if not include_content and not save_to:
         return _summary(meta)
 
     mime = meta.get("mimeType", "")
@@ -141,13 +147,19 @@ def read_file(
         _, done = downloader.next_chunk()
     raw = buf.getvalue()
 
+    if save_to:
+        path = pathlib.Path(save_to).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+        return {**_summary(meta), "path": str(path), "bytes": len(raw)}
+
     try:
         text = raw.decode("utf-8")
         truncated = len(text) > max_chars
         if truncated:
             text = text[:max_chars]
     except UnicodeDecodeError:
-        text = f"(binary, {len(raw)} bytes — use export_mime or download directly)"
+        text = f"(binary, {len(raw)} bytes — pass save_to to write it to a local file)"
         truncated = False
 
     return {**_summary(meta), "content": text, "truncated": truncated, "bytes": len(raw)}
@@ -207,7 +219,7 @@ def upload(
             Docs/Sheets on upload.
     """
     svc = service("drive", "v3", account=account)
-    body: dict[str, Any] = {"name": name or local_path.rsplit("/", 1)[-1]}
+    body: dict[str, Any] = {"name": name or pathlib.Path(local_path).name}
     if parent_id:
         body["parents"] = [parent_id]
     if convert_to_google:
