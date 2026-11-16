@@ -11,7 +11,7 @@ dependencies = [
     "fastmcp>=4.1.8",
     "google-auth>=2.62.0",
     "google-auth-oauthlib>=1.5.0",
-    "google-api-python-client>=2.201.0",
+    "google-api-python-client>=2.202.0",
     "keyring>=25.7.0",
     # Local IANA zone on Windows, which has no /etc/localtime.
     "tzlocal>=5.4.5",
