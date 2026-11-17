@@ -129,6 +129,7 @@ def gmail_send(
     bcc: list[str] | None = None,
     reply_to: str | None = None,
     dry_run: bool = False,
+    attachments: list[str] | None = None,
 ) -> dict:
     """Send an email. DESTRUCTIVE — irreversible once sent.
 
@@ -141,11 +142,13 @@ def gmail_send(
             Use gmail_sendas_list to see available aliases.
         dry_run: If True, return what WOULD be sent without calling the API.
             Use this to verify recipient, subject, and body before committing.
+        attachments: Local file paths to attach. Mime type is guessed from
+            the extension. A missing file fails before anything is sent.
     """
     return gmail_tools.send(
         to=to, subject=subject, body=body, account=account,
         from_alias=from_alias, cc=cc, bcc=bcc, reply_to=reply_to,
-        dry_run=dry_run,
+        dry_run=dry_run, attachments=attachments,
     )
 
 
@@ -158,6 +161,7 @@ def gmail_draft(
     from_alias: str | None = None,
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
+    attachments: list[str] | None = None,
 ) -> dict:
     """Create a draft. Does not send.
 
@@ -165,10 +169,12 @@ def gmail_draft(
         body: Plain text or HTML. A body that opens with an HTML tag (e.g.
             "<p>") becomes an HTML email with a plain-text fallback; any
             other body stays plain text.
+        attachments: Local file paths to attach. Mime type is guessed from
+            the extension.
     """
     return gmail_tools.draft(
         to=to, subject=subject, body=body, account=account,
-        from_alias=from_alias, cc=cc, bcc=bcc,
+        from_alias=from_alias, cc=cc, bcc=bcc, attachments=attachments,
     )
 
 
@@ -181,7 +187,8 @@ def gmail_reply(
     dry_run: bool = False,
 ) -> dict:
     """Reply to a message. DESTRUCTIVE — sends immediately, same blast radius as gmail_send.
-    Preserves thread + headers.
+    Preserves thread + headers. Replying to a message this account sent (a
+    follow-up on your own mail) goes to that message's To, not back to you.
 
     Args:
         body: Plain text or HTML. A body that opens with an HTML tag (e.g.
@@ -469,6 +476,7 @@ def drive_read_file(
     include_content: bool = False,
     export_mime: str | None = None,
     max_chars: int = 50_000,
+    save_to: str | None = None,
 ) -> dict:
     """Read a Drive file. Metadata by default; content is opt-in.
 
@@ -479,10 +487,13 @@ def drive_read_file(
         export_mime: e.g. 'text/markdown' (Docs), 'application/pdf', or
             'text/csv' (Sheets). Ignored for non-Google files.
         max_chars: Cap on returned content. Default 50k.
+        save_to: Local file path. Writes the file (or its export) there and
+            returns the path instead of the content. Use it for PDFs and
+            other binaries, which otherwise come back as a byte count only.
     """
     return drive_tools.read_file(
         file_id=file_id, account=account, include_content=include_content,
-        export_mime=export_mime, max_chars=max_chars,
+        export_mime=export_mime, max_chars=max_chars, save_to=save_to,
     )
 
 
@@ -775,6 +786,7 @@ def docs_export(
     mime: str = "text/markdown",
     account: str | None = None,
     max_chars: int = 100_000,
+    save_to: str | None = None,
 ) -> dict:
     """Export a Doc to a formatted output file. Default is markdown (headers, bold, lists preserved).
     Preferred over docs_read when you need formatted content rather than stripped plain text.
@@ -784,9 +796,13 @@ def docs_export(
         mime: 'text/markdown' (default) | 'text/plain' | 'application/pdf' |
             'application/rtf' |
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document' (.docx)
+        save_to: Local file path. Writes the export there and returns the path
+            instead of the content. Needed for PDF and .docx, which otherwise
+            come back as a byte count only.
     """
     return docs_tools.export(
         document_id=document_id, mime=mime, account=account, max_chars=max_chars,
+        save_to=save_to,
     )
 
 
