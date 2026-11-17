@@ -32,8 +32,8 @@
         "${__dirname}/server.py"
       ],
       "env": {
-        "GOOGLE_OAUTH_CLIENT_ID": "${user_config.google_oauth_client_id}",
-        "GOOGLE_OAUTH_CLIENT_SECRET": "${user_config.google_oauth_client_secret}"
+        "GWS_CLIENT_ID": "${user_config.google_oauth_client_id}",
+        "GWS_CLIENT_SECRET": "${user_config.google_oauth_client_secret}"
       }
     }
   },

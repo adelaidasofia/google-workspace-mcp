@@ -13,6 +13,7 @@ Design rules:
 from __future__ import annotations
 
 import base64
+import mimetypes
 import pathlib
 import re
 from email.message import EmailMessage
@@ -265,6 +266,7 @@ def _build_raw(
     in_reply_to: str | None = None,
     references: str | None = None,
     thread_message_id: str | None = None,
+    attachments: list[str] | None = None,
 ) -> tuple[str, str | None]:
     msg = EmailMessage()
     if from_alias:
@@ -289,6 +291,20 @@ def _build_raw(
         msg.add_alternative(body, subtype="html")
     else:
         msg.set_content(body)
+
+    # Attachments are local paths, read here so a missing file raises before
+    # anything is sent (dry_run included). add_attachment turns the message
+    # into multipart/mixed with the body, plain or alternative, as its first
+    # part. An extension mimetypes does not know goes as application/octet-stream.
+    for p in attachments or []:
+        path = pathlib.Path(p).expanduser()
+        ctype, encoding = mimetypes.guess_type(path.name)
+        if ctype is None or encoding is not None:
+            ctype = "application/octet-stream"
+        maintype, subtype = ctype.split("/", 1)
+        msg.add_attachment(
+            path.read_bytes(), maintype=maintype, subtype=subtype, filename=path.name
+        )
 
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
     return raw, thread_message_id
@@ -325,13 +341,18 @@ def send(
     bcc: list[str] | None = None,
     reply_to: str | None = None,
     dry_run: bool = False,
+    attachments: list[str] | None = None,
 ) -> dict:
     """Send mail. DESTRUCTIVE — irreversible once sent.
 
     `from_alias` lets you send as a configured Send-As identity.
+    `attachments` are local file paths; each is read and attached as-is.
     If dry_run=True, returns what WOULD be sent without calling the API.
     """
-    raw, _ = _build_raw(to, subject, body, from_alias=from_alias, cc=cc, bcc=bcc, reply_to=reply_to)
+    raw, _ = _build_raw(
+        to, subject, body, from_alias=from_alias, cc=cc, bcc=bcc, reply_to=reply_to,
+        attachments=attachments,
+    )
     if dry_run:
         return {
             "dry_run": True,
@@ -340,6 +361,7 @@ def send(
             "from_alias": from_alias,
             "cc": cc,
             "body_preview": body[:500],
+            "attachments": [pathlib.Path(p).name for p in attachments or []],
             "status": "NOT SENT — dry_run=True",
         }
     svc = service("gmail", "v1", account=account)
@@ -356,9 +378,12 @@ def draft(
     from_alias: str | None = None,
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
+    attachments: list[str] | None = None,
 ) -> dict:
     svc = service("gmail", "v1", account=account)
-    raw, _ = _build_raw(to, subject, body, from_alias=from_alias, cc=cc, bcc=bcc)
+    raw, _ = _build_raw(
+        to, subject, body, from_alias=from_alias, cc=cc, bcc=bcc, attachments=attachments
+    )
     created = (
         svc.users().drafts().create(userId="me", body={"message": {"raw": raw}}).execute()
     )
@@ -389,9 +414,15 @@ def reply(
     if not subject.lower().startswith("re:"):
         subject = f"Re: {subject}"
 
-    to_list = [from_hdr] if from_hdr else []
-    if reply_all and to_hdr:
-        to_list += [t.strip() for t in to_hdr.split(",") if t.strip()]
+    # A message this mailbox sent carries the SENT label (aliases included).
+    # Replying to its From would address the follow-up to ourselves; the people
+    # waiting on it are the ones it went To, as in Gmail's own Reply button.
+    if "SENT" in original.get("labelIds", []):
+        to_list = [t.strip() for t in to_hdr.split(",") if t.strip()]
+    else:
+        to_list = [from_hdr] if from_hdr else []
+        if reply_all and to_hdr:
+            to_list += [t.strip() for t in to_hdr.split(",") if t.strip()]
     cc_list = [c.strip() for c in cc_hdr.split(",") if c.strip()] if cc_hdr else None
 
     if dry_run:
